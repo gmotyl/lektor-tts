@@ -76,8 +76,10 @@ https://github.com/gmotyl/lektor-tts/blob/main/PRIVACY.md
 - `offscreen`: an MV3 service worker cannot play audio, so an offscreen document holds the
   `<audio>` element that plays the speech.
 - `contextMenus`: adds "Read selection" and "Read from here" to the page's right-click menu.
-- `storage`: keeps the user's settings (engine preset, server address, API key, voice, speed,
-  autoscroll) in `chrome.storage.sync`.
+- `storage`: keeps the user's settings (engine preset, server address, API key, model, voice,
+  speed, autoscroll) in `chrome.storage.sync`, and the current reading session (sentences being
+  read and engine settings) in `chrome.storage.session`, in memory only and cleared when the
+  browser closes, so playback survives a background worker restart.
 - Host permissions `http://localhost/*` and `http://127.0.0.1/*`: reach a speech server running
   on the user's own computer (omnivoice-server listens on `http://localhost:8892/v1`) without a
   prompt.

@@ -30,6 +30,11 @@ stored in your browser's sync storage (`chrome.storage.sync`). If browser sync i
 browser syncs them between your own devices. The API key is sent only to the engine it was
 entered for, as an `Authorization` header.
 
+While a page is being read, the current reading session (the sentences being read and the
+engine settings) is also kept in `chrome.storage.session`, so playback survives a restart of the
+extension's background worker. Session storage lives in memory on your device only, is never
+synced, and is cleared when the browser closes.
+
 ## No analytics, no remote code
 
 Lektor contains no analytics, tracking, advertising or crash reporting, and it loads no remote
