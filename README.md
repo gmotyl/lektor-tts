@@ -1,4 +1,4 @@
-# OmniVoice Reader
+# Lektor TTS
 
 ## What it is
 
