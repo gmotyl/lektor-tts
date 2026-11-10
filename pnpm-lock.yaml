@@ -18,6 +18,9 @@ importers:
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       linkedom:
         specifier: ^0.18.0
         version: 0.18.15
@@ -322,6 +325,9 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
+
   html-escaper@3.0.3:
     resolution: {integrity: sha512-RuMffC89BOWQoY0WKGpIhn5gX3iI54O6nRA0yC124NYVtzjmFWBIiFd8M0x+ZdX0P9R4lADg1mgP8C7PxGOWuQ==}
 
@@ -561,6 +567,8 @@ snapshots:
       '@esbuild/win32-arm64': 0.25.12
       '@esbuild/win32-ia32': 0.25.12
       '@esbuild/win32-x64': 0.25.12
+
+  fflate@0.8.3: {}
 
   html-escaper@3.0.3: {}
 

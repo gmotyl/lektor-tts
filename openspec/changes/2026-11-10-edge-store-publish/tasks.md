@@ -214,9 +214,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "package zip holds only runtime files"
 - "package refuses mismatched versions"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm package && unzip -l lektor-tts-1.0.0.zip` — Expected: PASS, runtime files only
-- [ ] **Step 3: Commit** — `git commit -am "feat: pnpm package builds the store zip"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm package && unzip -l lektor-tts-1.0.0.zip` — Expected: PASS, runtime files only
+- [x] **Step 3: Commit** — `git commit -am "feat: pnpm package builds the store zip"`
 
 ### Task 12: Fake engine and screenshots
 
