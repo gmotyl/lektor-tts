@@ -157,9 +157,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "setup button opens the options page"
 - "close removes the setup prompt bar"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm build && corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: setup prompt in the player bar while unconfigured"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm build && corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: setup prompt in the player bar while unconfigured"`
 
 ### Task 10: Setup screen (options page)
 
