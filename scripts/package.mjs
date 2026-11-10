@@ -1,6 +1,6 @@
 // Builds the store zip: lektor-tts-<version>.zip with runtime files only
 // (manifest.json, dist/**, src/** without __tests__, icons/*.png).
-import { readFileSync, readdirSync, writeFileSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, statSync, existsSync, rmSync } from "node:fs";
 import { join, dirname, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -43,10 +43,14 @@ export async function packageExtension({ root = repoRoot, outDir = root, build =
       `version mismatch: manifest.json ${manifestVersion} != package.json ${packageVersion}`,
     );
   }
+  const zipPath = join(outDir, `lektor-tts-${manifestVersion}.zip`);
+  // A failed build must not leave an older zip under the same name, and leftover
+  // dist files from earlier builds must not end up in the package.
+  rmSync(zipPath, { force: true });
+  rmSync(join(root, "dist"), { recursive: true, force: true });
   await build(root);
   const files = runtimeFiles(root);
   const entries = Object.fromEntries(files.map((path) => [path, readFileSync(join(root, path))]));
-  const zipPath = join(outDir, `lektor-tts-${manifestVersion}.zip`);
   writeFileSync(zipPath, zipSync(entries, { level: 9 }));
   return { zipPath, files };
 }

@@ -79,3 +79,45 @@ test("package refuses mismatched versions", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("package deletes a stale zip before building, so a failed build leaves none", async () => {
+  const root = fakeRoot();
+  const zipPath = join(root, "lektor-tts-1.0.0.zip");
+  writeFileSync(zipPath, "stale");
+  try {
+    await assert.rejects(
+      packageExtension({
+        root,
+        build: () => {
+          throw new Error("build failed");
+        },
+      }),
+      /build failed/,
+    );
+    assert.equal(existsSync(zipPath), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("package clears dist before building, so leftover files are not packed", async () => {
+  const root = fakeRoot();
+  mkdirSync(join(root, "dist", "old"), { recursive: true });
+  writeFileSync(join(root, "dist", "stale.js"), "old");
+  writeFileSync(join(root, "dist", "old", "chunk.js"), "old");
+  try {
+    let distAtBuild = null;
+    const { zipPath } = await packageExtension({
+      root,
+      build: (r) => {
+        distAtBuild = existsSync(join(r, "dist")) ? readdirSync(join(r, "dist")) : [];
+        fakeBuild(r);
+      },
+    });
+    assert.deepEqual(distAtBuild, []);
+    const names = Object.keys(unzipSync(readFileSync(zipPath)));
+    assert.deepEqual(names.filter((name) => name.startsWith("dist/")), ["dist/content.js"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
