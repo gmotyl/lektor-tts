@@ -4,7 +4,9 @@
 //
 // Writes store/screenshot-setup.png, store/screenshot-unconfigured.png and
 // store/screenshot-reading.png (1280×800 each), plus qa/visual/setup-390.png,
-// qa/visual/setup-1280.png and qa/visual/icon-toolbars.png for the mockup comparison.
+// qa/visual/setup-1280.png, qa/visual/icon-toolbars.png and the other setup states
+// (setup-{other,omnivoice,success,more}-{1280,390}.png, bar-unconfigured-390.png) for the
+// mockup comparison.
 //
 // The toolbar button cannot be clicked in headless Chromium, and chrome.action.onClicked
 // cannot be fired from outside, so the script runs the same path in the service worker as the
@@ -82,8 +84,6 @@ async function setupScreens({ context, extensionId }) {
   // A fresh install has no card checked; the screenshots show the OpenAI card chosen.
   await page.locator('label.card:has(input[value="openai"])').click();
   await page.locator("#apiKey").waitFor({ state: "visible" });
-  // Drop the click's focus ring: the checked card shows on its own (navy border, yellow dot).
-  await page.evaluate(() => document.activeElement?.blur());
   await shoot(page, join(STORE, "screenshot-setup.png"));
   await shoot(page, join(QA, "setup-1280.png"), { fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -98,6 +98,9 @@ async function unconfiguredBar({ context, worker }, articleUrl) {
   await page.locator("omnivoice-reader-bar").waitFor({ state: "attached" });
   await page.waitForTimeout(300);
   await shoot(page, join(STORE, "screenshot-unconfigured.png"));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  await shoot(page, join(QA, "bar-unconfigured-390.png"));
   await page.close();
 }
 
@@ -125,6 +128,41 @@ async function reading({ context, worker }, articleUrl, engineUrl) {
   await page.mouse.move(0, 0);
   await page.waitForTimeout(500);
   await shoot(page, join(STORE, "screenshot-reading.png"));
+  await page.close();
+}
+
+const WIDTHS = [1280, 390];
+
+async function atWidths(page, name) {
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
+    await shoot(page, join(QA, `${name}-${width}.png`), { fullPage: true });
+  }
+}
+
+// The other setup states the mockup shows: each card selected, the connected status after
+// "Save and test" (omnivoice-server pointed at the fake engine) and "More settings" opened.
+// Saves settings, so it runs after the unconfigured bar.
+async function setupStates({ context, extensionId }, engineUrl) {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/src/options.html`);
+  const card = (value) => page.locator(`label.card:has(input[value="${value}"])`);
+  await card("other").click();
+  await page.locator("#baseUrl").waitFor({ state: "visible" });
+  await atWidths(page, "setup-other");
+  await card("omnivoice").click();
+  await page.locator("#quick-start").waitFor({ state: "visible" });
+  await atWidths(page, "setup-omnivoice");
+  await page.setViewportSize(SIZE);
+  await page.locator("#baseUrl").fill(`${engineUrl}/v1`);
+  await page.getByRole("button", { name: "Save and test" }).click();
+  await page.locator("#status.ok").waitFor();
+  await page.mouse.move(0, 0);
+  await atWidths(page, "setup-success");
+  await page.locator("#more summary").click();
+  await page.locator("#speed").waitFor({ state: "visible" });
+  await page.mouse.move(0, 0);
+  await atWidths(page, "setup-more");
   await page.close();
 }
 
@@ -188,6 +226,7 @@ export async function main() {
     const articleUrl = `${engine.url}${ARTICLE}`;
     await setupScreens(browser);
     await unconfiguredBar(browser, articleUrl);
+    await setupStates(browser, engine.url);
     await reading(browser, articleUrl, engine.url);
     await iconToolbars(browser);
   } finally {
