@@ -12,9 +12,18 @@ export const DEFAULTS = Object.freeze({
   preset: "",
 });
 
-// Engine keys whose saved values, when they differ from these old defaults, mark a setup made
+// Engine defaults of the versions before presets existed, frozen on their own so a later change
+// to DEFAULTS cannot change which saved settings the migration treats as a real setup.
+const OLD_ENGINE_DEFAULTS = Object.freeze({
+  baseUrl: "http://localhost:8892/v1",
+  apiKey: "",
+  voice: "",
+  model: "tts-1",
+});
+
+// Engine keys whose saved values, when they differ from the old defaults, mark a setup made
 // before presets existed.
-const ENGINE_KEYS = ["baseUrl", "apiKey", "voice", "model"];
+const ENGINE_KEYS = Object.keys(OLD_ENGINE_DEFAULTS);
 
 export function isConfigured(settings) {
   return PRESET_IDS.includes(settings?.preset);
@@ -45,7 +54,7 @@ export async function loadSettings(storage) {
   for (const key of NON_EMPTY) merged[key] = orDefault(key, merged[key]);
   for (const key of BOOLEAN) merged[key] = toBoolean(merged[key]);
   // Migration: a pre-preset setup gets its preset inferred from the base URL and written back.
-  if (!merged.preset && ENGINE_KEYS.some((key) => merged[key] !== DEFAULTS[key])) {
+  if (!merged.preset && ENGINE_KEYS.some((key) => merged[key] !== OLD_ENGINE_DEFAULTS[key])) {
     merged.preset = presetForBaseUrl(merged.baseUrl);
     try {
       await storage.set?.({ preset: merged.preset });
