@@ -92,9 +92,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "omnivoice preset points at localhost 8892 and the GitHub quick start"
 - "presetForBaseUrl maps known hosts"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: engine presets"` (add the new files)
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: engine presets"` (add the new files)
 
 ### Task 7: `preset` setting and migration
 
