@@ -9,6 +9,7 @@
   },
   "packageManager": "pnpm@10.14.0",
   "scripts": {
+    "pretest": "node build.mjs",
     "test": "node --test \"src/**/*.test.mjs\" \"scripts/__tests__/*.test.mjs\"",
     "icons": "node scripts/render-icons.mjs",
     "build": "node build.mjs",

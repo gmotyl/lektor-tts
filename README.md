@@ -184,15 +184,15 @@ Bugs and questions: [GitHub Issues](https://github.com/gmotyl/lektor-tts/issues)
 
 ```bash
 pnpm install
-pnpm build           # must run before pnpm test: the manifest test checks dist/content.js
-pnpm test            # node --test over src/**/*.test.mjs and scripts/__tests__
+pnpm build           # bundles the content script into dist/content.js
+pnpm test            # builds, then node --test over src/**/*.test.mjs and scripts/__tests__
 pnpm icons           # re-render icons/*.png and store/logo-300.png from icons/icon.svg
 pnpm screenshots     # store screenshots + qa/visual captures (headless Chromium, fake engine)
 pnpm package         # lektor-tts-<version>.zip for the store
 ```
 
-`pnpm test` does not build by itself, so run `pnpm build` first (and again after changing
-`src/content/`). `pnpm screenshots` and `pnpm package` build on their own.
+`pnpm test`, `pnpm screenshots` and `pnpm package` build on their own (the manifest test
+checks `dist/content.js`), so a fresh checkout needs no separate `pnpm build`.
 
 `pnpm screenshots` needs Playwright's Chromium. On Ubuntu 20.04 Playwright's browser install
 does not support the host, so install it with:
@@ -256,7 +256,7 @@ Specs live in `openspec/specs/`; open changes in `openspec/changes/`.
 
 1. Bump `version` in both `manifest.json` and `package.json` (they must match, or
    `pnpm package` refuses).
-2. `pnpm build && pnpm test` (the tests need `dist/content.js`).
+2. `pnpm test` (builds `dist/content.js` first).
 3. `pnpm package` → `lektor-tts-<version>.zip`.
 4. `pnpm screenshots` if the UI changed, and commit the new `store/*.png`.
 5. In Partner Center, upload the zip and paste the texts from
