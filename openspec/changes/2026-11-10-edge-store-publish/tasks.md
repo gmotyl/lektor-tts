@@ -56,9 +56,9 @@
 - "render-icons writes 16 48 128 and 300 px PNGs from icon.svg"
 - "16 px icon keeps the L and the outer arc distinguishable from the tile"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm icons && corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git add icons store scripts package.json pnpm-lock.yaml && git commit -m "feat: L monogram icon rendered from one SVG"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm icons && corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git add icons store scripts package.json pnpm-lock.yaml && git commit -m "feat: L monogram icon rendered from one SVG"`
 
 ### Task 6: Engine presets
 

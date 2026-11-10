@@ -9,13 +9,15 @@
   },
   "packageManager": "pnpm@10.14.0",
   "scripts": {
-    "test": "node --test \"src/**/*.test.mjs\"",
+    "test": "node --test \"src/**/*.test.mjs\" \"scripts/__tests__/*.test.mjs\"",
+    "icons": "node scripts/render-icons.mjs",
     "build": "node build.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "esbuild": "^0.25.0",
     "linkedom": "^0.18.0"
   }
