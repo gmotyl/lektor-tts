@@ -116,9 +116,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "untouched defaults stay unconfigured"
 - "isConfigured is true for every preset id"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: preset setting with migration of saved settings"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: preset setting with migration of saved settings"`
 
 ### Task 8: Open the setup screen on install
 

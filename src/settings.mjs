@@ -1,4 +1,5 @@
 // User settings kept in chrome.storage.sync.
+import { PRESET_IDS, presetForBaseUrl } from "./presets.mjs";
 
 export const DEFAULTS = Object.freeze({
   baseUrl: "http://localhost:8892/v1",
@@ -7,7 +8,17 @@ export const DEFAULTS = Object.freeze({
   speed: 1.0,
   model: "tts-1",
   autoscroll: true,
+  // Engine preset id; "" = unconfigured (no engine set up yet).
+  preset: "",
 });
+
+// Engine keys whose saved values, when they differ from these old defaults, mark a setup made
+// before presets existed.
+const ENGINE_KEYS = ["baseUrl", "apiKey", "voice", "model"];
+
+export function isConfigured(settings) {
+  return PRESET_IDS.includes(settings?.preset);
+}
 
 // Keys that cannot be blank: an empty (or whitespace-only) value means the default.
 const NON_EMPTY = new Set(["baseUrl", "model"]);
@@ -33,6 +44,15 @@ export async function loadSettings(storage) {
   const merged = { ...DEFAULTS, ...(got || {}) };
   for (const key of NON_EMPTY) merged[key] = orDefault(key, merged[key]);
   for (const key of BOOLEAN) merged[key] = toBoolean(merged[key]);
+  // Migration: a pre-preset setup gets its preset inferred from the base URL and written back.
+  if (!merged.preset && ENGINE_KEYS.some((key) => merged[key] !== DEFAULTS[key])) {
+    merged.preset = presetForBaseUrl(merged.baseUrl);
+    try {
+      await storage.set?.({ preset: merged.preset });
+    } catch {
+      // Not persisted: inferred again on the next load.
+    }
+  }
   return merged;
 }
 
