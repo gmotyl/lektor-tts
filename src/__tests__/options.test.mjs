@@ -378,7 +378,7 @@ test("more settings is collapsed and model change updates voices", async () => {
   const more = document.querySelector("details#more");
   assert.ok(more);
   assert.equal(more.hasAttribute("open"), false);
-  assert.equal(more.querySelector("summary").textContent.trim(), "More settings");
+  assert.equal(more.querySelector("summary").textContent.trim(), "More settings: speed, autoscroll, model");
   for (const id of ["speed", "autoscroll", "model"]) assert.ok(more.querySelector(`#${id}`), `${id} inside More settings`);
   assert.equal(document.getElementById("voice").value, "verse");
 
@@ -391,6 +391,30 @@ test("more settings is collapsed and model change updates voices", async () => {
   assert.deepEqual(options(voice), voicesFor("openai", "tts-1"));
   // "verse" is not a tts-1 voice: the first one is selected.
   assert.equal(voice.value, voicesFor("openai", "tts-1")[0]);
+});
+
+// The page's own stylesheet, for rules linkedom cannot compute.
+const CSS = HTML.match(/<style>([\s\S]*?)<\/style>/)[1];
+
+test("more settings summary ends with a disclosure arrow instead of the default marker", () => {
+  assert.match(CSS, /#more summary \{[^}]*list-style: none/);
+  assert.match(CSS, /#more summary::after \{ content: " \\25B8"; \}/);
+  assert.match(CSS, /#more\[open\] summary::after \{ content: " \\25BE"; \}/);
+});
+
+test("card focus ring shows for keyboard focus only", () => {
+  // A mouse click on a card must not leave a ring; keyboard focus on its radio must.
+  assert.doesNotMatch(CSS, /\.card:focus-within/);
+  assert.match(CSS, /\.card:has\(input:focus-visible\) \{ outline: 2px solid var\(--focus\)/);
+});
+
+test("voice and model controls span the field width", () => {
+  assert.match(CSS, /#voice-field, #model-field \{ display: flex; flex-direction: column; \}/);
+});
+
+test("card titles leave only the checked dot's room on the right", () => {
+  // 16 px wrapped "omnivoice-server" at 1280 px; the mockup keeps it on one line.
+  assert.match(CSS, /\.card b \{[^}]*padding-right: 8px/);
 });
 
 test("footer has the buy me a coffee link", async () => {
