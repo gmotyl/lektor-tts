@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Lektor TTS: a Chrome/Edge MV3 extension that reads pages aloud through an OpenAI-compatible /audio/speech engine",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "packageManager": "pnpm@10.14.0",
   "scripts": {

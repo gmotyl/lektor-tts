@@ -35,7 +35,7 @@ the store and the setup screen opens in a new tab.
 
 ### From source
 
-Needs Chrome or Edge 116+ and Node 22+ with pnpm (`corepack pnpm` picks the pinned version).
+Needs Chrome or Edge 116+ and Node 22.13+ with pnpm (`corepack pnpm` picks the pinned version).
 
 ```bash
 git clone https://github.com/gmotyl/lektor-tts.git
