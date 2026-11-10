@@ -269,5 +269,5 @@ Steps:
 **Verification: non-testable** — Run: `grep -c "buymeacoffee.com/motyl.dev" README.md store/listing.md; grep -E "sk-[A-Za-z0-9]" -r store README.md PRIVACY.md` — Expected: ≥1 each; no key matches.
 
 - [x] **Step 1: Write the three files, commit** — `git add store/listing.md PRIVACY.md README.md && git commit -m "docs: store listing kit, privacy policy, README"`
-- [ ] **Step 2: Push `feat/store-release`, open PR to `main`** — `gh pr create --base main` (body ends with the Claude Code attribution)
+- [x] **Step 2: Push `feat/store-release`, open PR to `main`** — `gh pr create --base main` (body ends with the Claude Code attribution)
 
