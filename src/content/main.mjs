@@ -308,6 +308,8 @@ export function createController({
 
   function showSetupPrompt() {
     stop();
+    // stop() is a no-op without a session: still supersede a start awaiting settings or voices.
+    startToken++;
     if (setupBar) return;
     setupBar = makeBar({
       doc,
