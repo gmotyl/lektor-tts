@@ -233,9 +233,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 **Tests (names only — red first):**
 - "fake engine serves models, voices and silent speech with CORS"
 
-- [ ] **Step 1: Write the failing test** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Implement both scripts** — Run: `corepack pnpm exec playwright install chromium && corepack pnpm screenshots && file store/*.png` — Expected: PASS, 1280 x 800
-- [ ] **Step 3: Commit** — `git add scripts store package.json pnpm-lock.yaml && git commit -m "feat: fake engine and store screenshots"`
+- [x] **Step 1: Write the failing test** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Implement both scripts** — Run: `corepack pnpm exec playwright install chromium && corepack pnpm screenshots && file store/*.png` — Expected: PASS, 1280 x 800
+- [x] **Step 3: Commit** — `git add scripts store package.json pnpm-lock.yaml && git commit -m "feat: fake engine and store screenshots"`
 
 ### Task 13: Visual verification against mockups
 References:
