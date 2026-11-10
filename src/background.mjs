@@ -208,7 +208,13 @@ export function createBackground(chrome, deps = {}) {
     await toTab(tabId, msg);
   }
 
-  chrome.runtime.onInstalled.addListener(() => {
+  chrome.runtime.onInstalled.addListener((details) => {
+    // First run: open the setup screen. Updates keep the user's existing setup.
+    if (details?.reason === "install") {
+      Promise.resolve()
+        .then(() => chrome.runtime.openOptionsPage())
+        .catch(ignore);
+    }
     const create = () => {
       chrome.contextMenus.create({ id: MENU_SELECTION, title: "Read selection", contexts: ["selection"] });
       chrome.contextMenus.create({ id: MENU_FROM_HERE, title: "Read from here", contexts: ["page", "link", "image"] });

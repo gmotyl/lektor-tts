@@ -100,6 +100,26 @@ test("creates both context menus on install", async () => {
   assert.deepEqual([...byTitle["Read from here"].contexts].sort(), ["image", "link", "page"]);
 });
 
+test("fresh install opens the options page", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.runtime.onInstalled.fire({ reason: "install" });
+  await tick();
+  assert.equal(chrome.calls.optionsOpened, 1);
+  assert.deepEqual(chrome.calls.menus.map((m) => m.id).sort(), ["read-from-here", "read-selection"]);
+});
+
+test("update does not open the options page", async () => {
+  for (const reason of ["update", "chrome_update"]) {
+    const chrome = fakeChrome();
+    createBackground(chrome);
+    chrome.runtime.onInstalled.fire({ reason });
+    await tick();
+    assert.equal(chrome.calls.optionsOpened, 0, reason);
+    assert.equal(chrome.calls.menus.length, 2, reason);
+  }
+});
+
 test("action click injects content and sends start", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);

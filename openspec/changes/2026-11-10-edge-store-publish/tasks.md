@@ -134,9 +134,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "fresh install opens the options page"
 - "update does not open the options page"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: open setup screen on install"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: open setup screen on install"`
 
 ### Task 9: Setup prompt while unconfigured
 
