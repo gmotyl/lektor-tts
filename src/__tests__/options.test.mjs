@@ -418,3 +418,29 @@ test("an api key typed for one preset is never sent to another", async () => {
   assert.equal(calls[0].apiKey, "");
   assert.equal(calls[0].headers?.Authorization, undefined);
 });
+
+test("a denied or invalid save clears a stale connected status", async () => {
+  const { document, page } = await setup({
+    stored: { preset: "other", baseUrl: "http://localhost:9000/v1" },
+    voices: { ok: true, voices: ["x1"] },
+  });
+  assert.match(status(document), /Connected/);
+  // Invalid URL.
+  document.getElementById("baseUrl").value = "not a url";
+  await submit(document, page);
+  assert.match(document.getElementById("message").textContent, /Not saved/);
+  assert.equal(status(document), "");
+
+  // Denied permission.
+  const denied = await setup({
+    stored: { preset: "other", baseUrl: "http://localhost:9000/v1" },
+    grant: false,
+    voices: { ok: true, voices: ["x1"] },
+  });
+  assert.match(status(denied.document), /Connected/);
+  denied.document.getElementById("baseUrl").value = "https://tts.example.com/v1";
+  await submit(denied.document, denied.page);
+  assert.match(denied.document.getElementById("message").textContent, /permission/);
+  assert.equal(status(denied.document), "");
+  assert.equal(denied.chrome.writes.length, 0);
+});

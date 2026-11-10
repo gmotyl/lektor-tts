@@ -222,6 +222,7 @@ export function initOptions({
       origin = permissionOrigin(values.baseUrl);
     } catch (err) {
       setText(message, `Not saved: ${err?.message || "invalid base URL"}`, "error");
+      setText(status, "");
       return;
     }
     // Requested before any other await, while the click still counts as a user gesture.
@@ -229,6 +230,7 @@ export function initOptions({
       const granted = await Promise.resolve(chrome.permissions.request({ origins: [`${origin}/*`] })).catch(() => false);
       if (!granted) {
         setText(message, `Lektor needs permission to reach ${origin}`, "error");
+        setText(status, "");
         return;
       }
     }
