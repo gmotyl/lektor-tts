@@ -17,7 +17,7 @@ const ICONS = {
   // Down arrow over a page line: follow the read sentence down the page.
   autoscroll: svg('<rect x="2" y="1.5" width="12" height="1.6"/><path d="M7.2 4.5h1.6v5.2l2-2 1.1 1.1L8 12.7 4.1 8.8l1.1-1.1 2 2z"/><rect x="2" y="13" width="12" height="1.6"/>'),
   // Lektor monogram: L with a sound arc.
-  logo: '<svg aria-hidden="true" focusable="false" viewBox="0 0 128 128"><rect width="128" height="128" rx="28" fill="#1e2a4a"/><path d="M38 28 V94 H76" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/><path d="M72 46 a14 14 0 0 1 0 24" fill="none" stroke="#ffd54a" stroke-width="8" stroke-linecap="round"/></svg>',
+  logo: '<svg aria-hidden="true" focusable="false" viewBox="0 0 128 128"><rect width="128" height="128" rx="28" fill="#1e2a4a"/><path d="M38 28 V94 H76" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/><path d="M72 46 a14 14 0 0 1 0 24" fill="none" stroke="#ffd54a" stroke-width="8" stroke-linecap="round"/><path d="M84 34 a30 30 0 0 1 0 48" fill="none" stroke="#ffd54a" stroke-width="8" stroke-linecap="round"/></svg>',
   close: svg('<path d="M3.5 2.1 8 6.6l4.5-4.5 1.4 1.4L9.4 8l4.5 4.5-1.4 1.4L8 9.4l-4.5 4.5-1.4-1.4L6.6 8 2.1 3.5z"/>'),
 };
 
@@ -25,6 +25,8 @@ const STYLE = `
   :host { all: initial; }
   .bar {
     position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    /* left: 50% alone caps the shrink-to-fit width at half the viewport (195 px at 390 px). */
+    box-sizing: border-box; width: max-content; max-width: calc(100vw - 32px);
     z-index: 2147483647; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
     padding: 8px 12px; border-radius: 10px; background: #1f2328; color: #f6f8fa;
     font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
@@ -41,7 +43,8 @@ const STYLE = `
   .error a { color: #58a6ff; }
   .player { display: contents; }
   .player[hidden], .setup[hidden] { display: none; }
-  .setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  /* Basis 0: on a narrow viewport the prompt wraps inside itself and × stays beside it. */
+  .setup { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex: 1 1 0; min-width: 0; }
   .setup svg { width: 22px; height: 22px; flex: none; }
   .setup .message { flex: 1; min-width: 160px; }
   .setup-engine { background: #ffd54a; color: #1e2a4a; border-color: #ffd54a; font-weight: 600; }

@@ -171,6 +171,23 @@ test('setup prompt shows the message, the setup button and close, no retry', () 
   assert.deepEqual(actions.map(([t]) => t), ['setup']);
 });
 
+test('setup prompt logo is icon B with both sound arcs', () => {
+  const { attached } = setup();
+  const logo = attached[0].root.querySelector('.setup svg');
+  const arcs = [...logo.querySelectorAll('path[stroke="#ffd54a"]')].map((p) => p.getAttribute('d'));
+  assert.deepEqual(arcs, ['M72 46 a14 14 0 0 1 0 24', 'M84 34 a30 30 0 0 1 0 48']);
+});
+
+test('bar may grow to the viewport width minus a margin', () => {
+  // With left: 50% alone the shrink-to-fit width stops at half the viewport.
+  const { attached } = setup();
+  const css = attached[0].root.querySelector('style').textContent;
+  assert.match(css, /\.bar \{[^}]*width: max-content; max-width: calc\(100vw - 32px\)/);
+  assert.match(css, /\.bar \{[^}]*box-sizing: border-box/);
+  // The setup prompt shrinks and wraps inside itself, so × stays on its row.
+  assert.match(css, /\.setup \{[^}]*flex: 1 1 0; min-width: 0/);
+});
+
 test('close removes the setup prompt bar', async () => {
   const { document, window } = parseHTML('<!doctype html><html><head></head><body><p>Page</p></body></html>');
   const roots = [];
