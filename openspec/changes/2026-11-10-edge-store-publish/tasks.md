@@ -250,9 +250,9 @@ Acceptance criteria:
 - WHEN a mismatch is found THEN fix it and repeat the comparison; DOM assertions alone do not satisfy visual verification
 - WHEN the surface cannot be reached THEN ask the user for a screenshot; never check this task off without a comparison
 Steps:
-- [ ] Step 1: Capture screenshots per reference and viewport (`corepack pnpm screenshots` → `qa/visual/`); record match/mismatch per Check item
-- [ ] Step 2: Fix mismatches and repeat until every item matches or is an agreed deviation
-- [ ] Step 3: Save screenshots to `openspec/changes/2026-11-10-edge-store-publish/verification/` and list them with viewport sizes in the session progress note
+- [x] Step 1: Capture screenshots per reference and viewport (`corepack pnpm screenshots` → `qa/visual/`); record match/mismatch per Check item
+- [x] Step 2: Fix mismatches and repeat until every item matches or is an agreed deviation
+- [x] Step 3: Save screenshots to `openspec/changes/2026-11-10-edge-store-publish/verification/` and list them with viewport sizes in the session progress note
 
 ### Task 14: Listing kit, privacy policy and README
 
