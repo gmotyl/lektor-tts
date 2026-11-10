@@ -185,6 +185,7 @@ Bugs and questions: [GitHub Issues](https://github.com/gmotyl/lektor-tts/issues)
 ```bash
 pnpm install
 pnpm build           # bundles the content script into dist/content.js
+pnpm lint            # ESLint (eslint.config.mjs)
 pnpm test            # builds, then node --test over src/**/*.test.mjs and scripts/__tests__
 pnpm icons           # re-render icons/*.png and store/logo-300.png from icons/icon.svg
 pnpm screenshots     # store screenshots + qa/visual captures (headless Chromium, fake engine)
@@ -256,7 +257,7 @@ Specs live in `openspec/specs/`; open changes in `openspec/changes/`.
 
 1. Bump `version` in both `manifest.json` and `package.json` (they must match, or
    `pnpm package` refuses).
-2. `pnpm test` (builds `dist/content.js` first).
+2. `pnpm lint && pnpm test` (the test run builds `dist/content.js` first).
 3. `pnpm package` → `lektor-tts-<version>.zip`.
 4. `pnpm screenshots` if the UI changed, and commit the new `store/*.png`.
 5. In Partner Center, upload the zip and paste the texts from

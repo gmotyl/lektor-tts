@@ -171,7 +171,7 @@ test("16 px icon keeps the L and the outer arc distinguishable from the tile", (
   const [r, g, b] = png.at(4, 7);
   assert.ok(Math.min(r, g, b) >= 200, `L pixel is light: ${[r, g, b]}`);
   // Outer arc's right edge (x 92..100 of 128 → px 11.5..12.5) at its middle row.
-  const yellowness = ([pr, pg, pb]) => pr - pb;
+  const yellowness = ([pr, , pb]) => pr - pb;
   const best = [png.at(11, 7), png.at(12, 7), png.at(11, 6), png.at(12, 6)].sort((p, q) => yellowness(q) - yellowness(p))[0];
   assert.ok(yellowness(best) >= 60 && best[1] - best[2] >= 30, `outer arc pixel is yellowish: ${best}`);
 });

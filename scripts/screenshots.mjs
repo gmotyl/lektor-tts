@@ -12,6 +12,9 @@
 // cannot be fired from outside, so the script runs the same path in the service worker as the
 // action listener: inject dist/content.js, then send "setup-prompt" (no engine set up) or
 // "start" to the tab.
+
+// Callbacks passed to worker.evaluate / page.evaluate run in the browser, not in Node.
+/* global chrome, document */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
