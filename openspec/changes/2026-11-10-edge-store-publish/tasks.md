@@ -28,9 +28,9 @@
 - "manifest is named Lektor TTS at version 1.0.0"
 - "manifest and package.json versions match"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: rename to Lektor TTS 1.0.0"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: rename to Lektor TTS 1.0.0"`
 
 ### Task 5: Icon from one SVG
 
@@ -56,9 +56,9 @@
 - "render-icons writes 16 48 128 and 300 px PNGs from icon.svg"
 - "16 px icon keeps the L and the outer arc distinguishable from the tile"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm icons && corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git add icons store scripts package.json pnpm-lock.yaml && git commit -m "feat: L monogram icon rendered from one SVG"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm icons && corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git add icons store scripts package.json pnpm-lock.yaml && git commit -m "feat: L monogram icon rendered from one SVG"`
 
 ### Task 6: Engine presets
 
@@ -92,9 +92,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "omnivoice preset points at localhost 8892 and the GitHub quick start"
 - "presetForBaseUrl maps known hosts"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: engine presets"` (add the new files)
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: engine presets"` (add the new files)
 
 ### Task 7: `preset` setting and migration
 
@@ -116,9 +116,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "untouched defaults stay unconfigured"
 - "isConfigured is true for every preset id"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: preset setting with migration of saved settings"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: preset setting with migration of saved settings"`
 
 ### Task 8: Open the setup screen on install
 
@@ -134,9 +134,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "fresh install opens the options page"
 - "update does not open the options page"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: open setup screen on install"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: open setup screen on install"`
 
 ### Task 9: Setup prompt while unconfigured
 
@@ -157,9 +157,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "setup button opens the options page"
 - "close removes the setup prompt bar"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm build && corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: setup prompt in the player bar while unconfigured"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm build && corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: setup prompt in the player bar while unconfigured"`
 
 ### Task 10: Setup screen (options page)
 
@@ -195,9 +195,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "more settings is collapsed and model change updates voices"
 - "footer has the buy me a coffee link"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: setup screen with engine presets"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: setup screen with engine presets"`
 
 ### Task 11: Store package
 
@@ -214,9 +214,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "package zip holds only runtime files"
 - "package refuses mismatched versions"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm package && unzip -l lektor-tts-1.0.0.zip` — Expected: PASS, runtime files only
-- [ ] **Step 3: Commit** — `git commit -am "feat: pnpm package builds the store zip"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm package && unzip -l lektor-tts-1.0.0.zip` — Expected: PASS, runtime files only
+- [x] **Step 3: Commit** — `git commit -am "feat: pnpm package builds the store zip"`
 
 ### Task 12: Fake engine and screenshots
 
@@ -233,9 +233,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 **Tests (names only — red first):**
 - "fake engine serves models, voices and silent speech with CORS"
 
-- [ ] **Step 1: Write the failing test** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Implement both scripts** — Run: `corepack pnpm exec playwright install chromium && corepack pnpm screenshots && file store/*.png` — Expected: PASS, 1280 x 800
-- [ ] **Step 3: Commit** — `git add scripts store package.json pnpm-lock.yaml && git commit -m "feat: fake engine and store screenshots"`
+- [x] **Step 1: Write the failing test** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Implement both scripts** — Run: `corepack pnpm exec playwright install chromium && corepack pnpm screenshots && file store/*.png` — Expected: PASS, 1280 x 800
+- [x] **Step 3: Commit** — `git add scripts store package.json pnpm-lock.yaml && git commit -m "feat: fake engine and store screenshots"`
 
 ### Task 13: Visual verification against mockups
 References:
@@ -250,9 +250,9 @@ Acceptance criteria:
 - WHEN a mismatch is found THEN fix it and repeat the comparison; DOM assertions alone do not satisfy visual verification
 - WHEN the surface cannot be reached THEN ask the user for a screenshot; never check this task off without a comparison
 Steps:
-- [ ] Step 1: Capture screenshots per reference and viewport (`corepack pnpm screenshots` → `qa/visual/`); record match/mismatch per Check item
-- [ ] Step 2: Fix mismatches and repeat until every item matches or is an agreed deviation
-- [ ] Step 3: Save screenshots to `openspec/changes/2026-11-10-edge-store-publish/verification/` and list them with viewport sizes in the session progress note
+- [x] Step 1: Capture screenshots per reference and viewport (`corepack pnpm screenshots` → `qa/visual/`); record match/mismatch per Check item
+- [x] Step 2: Fix mismatches and repeat until every item matches or is an agreed deviation
+- [x] Step 3: Save screenshots to `openspec/changes/2026-11-10-edge-store-publish/verification/` and list them with viewport sizes in the session progress note
 
 ### Task 14: Listing kit, privacy policy and README
 
@@ -268,6 +268,6 @@ Steps:
 
 **Verification: non-testable** — Run: `grep -c "buymeacoffee.com/motyl.dev" README.md store/listing.md; grep -E "sk-[A-Za-z0-9]" -r store README.md PRIVACY.md` — Expected: ≥1 each; no key matches.
 
-- [ ] **Step 1: Write the three files, commit** — `git add store/listing.md PRIVACY.md README.md && git commit -m "docs: store listing kit, privacy policy, README"`
-- [ ] **Step 2: Push `feat/store-release`, open PR to `main`** — `gh pr create --base main` (body ends with the Claude Code attribution)
+- [x] **Step 1: Write the three files, commit** — `git add store/listing.md PRIVACY.md README.md && git commit -m "docs: store listing kit, privacy policy, README"`
+- [x] **Step 2: Push `feat/store-release`, open PR to `main`** — `gh pr create --base main` (body ends with the Claude Code attribution)
 

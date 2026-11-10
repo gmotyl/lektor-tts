@@ -76,3 +76,16 @@ test("every manifest path exists after build", () => {
 test("manifest requires Chrome 116 for runtime.getContexts", () => {
   assert.equal(readManifest().minimum_chrome_version, "116");
 });
+
+test("manifest is named Lektor TTS at version 1.0.0", () => {
+  const m = readManifest();
+  assert.equal(m.name, "Lektor TTS");
+  assert.equal(m.version, "1.0.0");
+  assert.equal(m.action?.default_title, "Lektor TTS");
+});
+
+test("manifest and package.json versions match", () => {
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.equal(readManifest().version, pkg.version);
+  assert.equal(pkg.name, "lektor-tts");
+});

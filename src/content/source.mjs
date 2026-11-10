@@ -66,7 +66,7 @@ export function articleContainer(doc, { Readability: Reader = Readability } = {}
   cloned.forEach((el, i) => el.setAttribute(MARK, String(i)));
   const pairs = pairTextNodes(clone.body, body);
 
-  let article = null;
+  let article;
   try {
     // serializer: keep the result as an element of the clone instead of an HTML string
     article = new Reader(clone, { serializer: (el) => el }).parse();
@@ -152,7 +152,7 @@ const SCROLLING = new Set(['auto', 'scroll', 'overlay']);
 export const MIN_PANE_TEXT = 200;
 
 function isScrollContainer(el, getStyle) {
-  let style = null;
+  let style;
   try {
     style = getStyle ? getStyle(el) : null;
   } catch {

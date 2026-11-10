@@ -364,6 +364,23 @@ test('stop during start does not start a session', async () => {
   assert.equal(barHosts(t.document), 0);
 });
 
+test('setup prompt during start cancels the pending start', async () => {
+  let release;
+  const listVoices = () => new Promise((r) => (release = r));
+  const t = setup({ listVoices });
+  const c = install(t.win, t.deps);
+  const starting = c.handle({ type: 'start', source: 'auto' });
+  await new Promise((r) => setImmediate(r));
+  c.handle({ type: 'setup-prompt' });
+  release({ ok: true, voices: ['a'] });
+  await starting;
+  assert.ok(c.session === null, 'no session'); // not assert.equal: inspecting a session walks the DOM
+  assert.equal(ofType(t.chrome.sent, 'play').length, 0);
+  assert.equal(t.bars.length, 1, 'only the setup bar');
+  assert.deepEqual(t.bars[0].states, ['setup']);
+  assert.equal(barHosts(t.document), 1, 'setup bar stays');
+});
+
 test('voices are asked once per session', async () => {
   let calls = 0;
   const listVoices = async () => {

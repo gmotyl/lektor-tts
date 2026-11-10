@@ -3,61 +3,135 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OmniVoice Reader options</title>
+    <title>Lektor TTS</title>
     <style>
-      body { font: 14px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 2rem auto; padding: 0 1rem; }
-      h1 { font-size: 1.3rem; }
-      .field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 1rem; }
-      label { font-weight: 600; }
-      input, select, button { font: inherit; padding: 0.35rem 0.5rem; }
-      .hint { color: #57606a; font-size: 0.85rem; margin: 0; }
-      .actions { display: flex; gap: 0.5rem; align-items: center; }
-      #status, #message { min-height: 1.5em; }
-      .error { color: #b3261e; }
-      .ok { color: #1a7f37; }
+      :root {
+        --ink: #1e2a4a;
+        --hi: #ffd54a;
+        --text: #1b1f2a;
+        --sub: #4a5268;
+        --rule: #dde1ea;
+        --ok: #1a7f37;
+        --err: #b3261e;
+        --focus: #2563eb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #fff;
+        color: var(--text);
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .page { max-width: 36rem; margin: 0 auto; padding: 24px 16px 28px; }
+      header .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+      header img { width: 32px; height: 32px; flex: none; }
+      header h1 { font-size: 20px; margin: 0; }
+      .lede { color: var(--sub); margin: 0 0 18px; }
+      .section-label { font-weight: 600; margin: 0 0 8px; }
+      .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+      .field label { font-weight: 600; }
+      .field .optional { font-weight: 400; color: var(--sub); }
+      .hint { color: var(--sub); font-size: 13px; margin: 0; }
+      input, select, button { font: inherit; padding: 6px 9px; border: 1px solid #b8bfcc; border-radius: 6px; background: #fff; color: var(--text); }
+      input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible, .card:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+      button { cursor: pointer; }
+      button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+      .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+      #status, #message { margin: 10px 0 0; font-size: 13px; }
+      #status:empty, #message:empty { display: none; }
+      .ok { color: var(--ok); }
+      .error { color: var(--err); }
+      a { color: #1d4ed8; }
+      code { font-size: 12px; }
+      [hidden] { display: none !important; }
+
+      /* Preset cards: an auto-fit grid, so they wrap at narrow widths (390 px). */
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 18px; }
+      .card { position: relative; display: block; border: 1.5px solid #c9ced9; border-radius: 10px; padding: 10px 12px; cursor: pointer; background: #fff; }
+      .card input { position: absolute; opacity: 0; pointer-events: none; }
+      /* Just enough room for the checked dot: "omnivoice-server" stays on one line at 1280 px. */
+      .card b { display: block; font-size: 14px; padding-right: 8px; }
+      .card span { display: block; font-size: 12px; color: var(--sub); margin-top: 2px; }
+      .card.checked { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); background: #f6f7fb; }
+      .card.checked::after { content: ""; position: absolute; top: 10px; right: 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--hi); box-shadow: 0 0 0 2px var(--ink); }
+
+      #more { margin-top: 18px; border-top: 1px solid var(--rule); padding-top: 12px; }
+      /* The voice and model controls are swapped in by options.mjs; they span the field like the inputs. */
+      #voice-field, #model-field { display: flex; flex-direction: column; }
+      #more summary { cursor: pointer; color: var(--sub); font-size: 13px; list-style: none; }
+      #more summary::-webkit-details-marker { display: none; }
+      #more summary::after { content: " \25B8"; }
+      #more[open] summary::after { content: " \25BE"; }
+      #more[open] summary { margin-bottom: 12px; }
+      footer { margin-top: 18px; font-size: 13px; color: var(--sub); }
     </style>
     <script type="module" src="options.mjs"></script>
   </head>
   <body>
-    <h1>OmniVoice Reader options</h1>
-    <form id="options" novalidate>
-      <div class="field">
-        <label for="baseUrl">Server base URL</label>
-        <input id="baseUrl" name="baseUrl" type="url" required aria-describedby="baseUrl-hint" />
-        <p id="baseUrl-hint" class="hint">
-          OpenAI-compatible endpoint, for example http://localhost:8892/v1. A server other than
-          localhost asks for permission to reach it.
-        </p>
-      </div>
-      <div class="field">
-        <label for="apiKey">API key</label>
-        <input id="apiKey" name="apiKey" type="password" autocomplete="off" aria-describedby="apiKey-hint" />
-        <p id="apiKey-hint" class="hint">Leave empty when the server needs none.</p>
-      </div>
-      <div class="field">
-        <label for="model">Model</label>
-        <input id="model" name="model" type="text" />
-      </div>
-      <div class="field">
-        <label for="voice">Voice</label>
-        <span id="voice-field"><input id="voice" name="voice" type="text" /></span>
-      </div>
-      <div class="field">
-        <label for="speed">Speed</label>
-        <input id="speed" name="speed" type="number" min="0.5" max="2" step="0.1" aria-describedby="speed-hint" />
-        <p id="speed-hint" class="hint">0.5 to 2.0.</p>
-      </div>
-      <div class="field checkbox">
-        <span><input id="autoscroll" name="autoscroll" type="checkbox" aria-describedby="autoscroll-hint" />
-        <label for="autoscroll">Autoscroll</label></span>
-        <p id="autoscroll-hint" class="hint">Scroll the page to the sentence being read. Also on the player bar.</p>
-      </div>
-      <div class="actions">
-        <button type="submit">Save</button>
-        <button type="button" id="test">Test connection</button>
-      </div>
-      <p id="status" role="status" aria-live="polite"></p>
-      <p id="message" role="alert"></p>
-    </form>
+    <main class="page">
+      <header>
+        <div class="brand"><img src="../icons/icon128.png" alt="" width="32" height="32" /><h1>Lektor TTS</h1></div>
+        <p class="lede">Lektor reads web pages aloud through a text-to-speech server. Choose one to get started.</p>
+      </header>
+      <form id="options" novalidate>
+        <p class="section-label" id="engine-label">Speech engine</p>
+        <div class="cards" role="radiogroup" aria-labelledby="engine-label">
+          <label class="card"><input type="radio" name="preset" value="openai" /><b>OpenAI</b><span>Paste an API key. Paid per use.</span></label>
+          <label class="card"><input type="radio" name="preset" value="omnivoice" /><b>omnivoice-server</b><span>Free, runs on your own computer.</span></label>
+          <label class="card"><input type="radio" name="preset" value="other" /><b>Other server</b><span>Any OpenAI-compatible endpoint.</span></label>
+        </div>
+
+        <div id="engine-fields" hidden>
+          <div class="field" id="baseUrl-field">
+            <label for="baseUrl" id="baseUrl-label">Base URL</label>
+            <input id="baseUrl" name="baseUrl" type="url" />
+            <p id="baseUrl-hint" class="hint" data-preset="other">
+              Must speak the OpenAI <code>/audio/speech</code> API. A server other than localhost asks for
+              permission to reach it.
+            </p>
+            <p id="omnivoice-hint" class="hint" data-preset="omnivoice">
+              Install and start it with the
+              <a id="quick-start" href="https://github.com/gmotyl/omnivoice-server#quick-start-read-web-pages-aloud" target="_blank" rel="noopener">Quick start</a>
+              (one command: <code>./omnivoicectl start</code>). Needs an NVIDIA GPU for real-time speech.
+            </p>
+          </div>
+          <div class="field" id="apiKey-field">
+            <label for="apiKey" id="apiKey-label">API key</label>
+            <input id="apiKey" name="apiKey" type="password" autocomplete="off" />
+            <p id="apiKey-hint" class="hint" data-preset="openai">
+              Create one at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com → API keys</a>.
+              Stored in your browser's sync storage, sent only to OpenAI.
+            </p>
+          </div>
+          <div class="field">
+            <label for="voice">Voice</label>
+            <span id="voice-field"><input id="voice" name="voice" type="text" /></span>
+          </div>
+        </div>
+
+        <div class="actions"><button class="primary" type="submit">Save and test</button></div>
+        <p id="status" role="status" aria-live="polite"></p>
+        <p id="message" role="alert"></p>
+
+        <details id="more">
+          <summary>More settings: speed, autoscroll, model</summary>
+          <div class="field">
+            <label for="model">Model</label>
+            <span id="model-field"><input id="model" name="model" type="text" /></span>
+          </div>
+          <div class="field">
+            <label for="speed">Speed</label>
+            <input id="speed" name="speed" type="number" min="0.5" max="2" step="0.1" aria-describedby="speed-hint" />
+            <p id="speed-hint" class="hint">0.5 to 2.0.</p>
+          </div>
+          <div class="field checkbox">
+            <span><input id="autoscroll" name="autoscroll" type="checkbox" aria-describedby="autoscroll-hint" />
+            <label for="autoscroll">Autoscroll</label></span>
+            <p id="autoscroll-hint" class="hint">Scroll the page to the sentence being read. Also on the player bar.</p>
+          </div>
+        </details>
+      </form>
+      <footer><a href="https://buymeacoffee.com/motyl.dev" target="_blank" rel="noopener">Buy me a coffee</a></footer>
+    </main>
   </body>
 </html>

@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { parseHTML } from "linkedom";
 import { createBackground } from "../background.mjs";
+import { createController } from "../content/main.mjs";
+import { createBar } from "../content/bar.mjs";
 
 function event() {
   const listeners = [];
@@ -13,6 +16,7 @@ function event() {
 
 // Minimal fake of the chrome.* surface the service worker uses; records every outgoing call.
 // `session` (a plain object) backs a fake chrome.storage.session shared across workers.
+// Settings default to a configured engine preset; pass `stored: { preset: "" }` for a fresh install.
 function fakeChrome({ stored = {}, session } = {}) {
   const calls = { tabMessages: [], runtimeMessages: [], injected: [], menus: [], offscreenCreated: 0, optionsOpened: 0 };
   let offscreenOpen = false;
@@ -63,7 +67,7 @@ function fakeChrome({ stored = {}, session } = {}) {
         calls.tabMessages.push({ tabId, msg });
       },
     },
-    storage: { sync: { get: async (defaults) => ({ ...defaults, ...stored }) } },
+    storage: { sync: { get: async (defaults) => ({ ...defaults, preset: "omnivoice", ...stored }) } },
   };
   if (session) {
     chrome.storage.session = {
@@ -98,6 +102,26 @@ test("creates both context menus on install", async () => {
   const byTitle = Object.fromEntries(chrome.calls.menus.map((m) => [m.title, m]));
   assert.deepEqual(byTitle["Read selection"].contexts, ["selection"]);
   assert.deepEqual([...byTitle["Read from here"].contexts].sort(), ["image", "link", "page"]);
+});
+
+test("fresh install opens the options page", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.runtime.onInstalled.fire({ reason: "install" });
+  await tick();
+  assert.equal(chrome.calls.optionsOpened, 1);
+  assert.deepEqual(chrome.calls.menus.map((m) => m.id).sort(), ["read-from-here", "read-selection"]);
+});
+
+test("update does not open the options page", async () => {
+  for (const reason of ["update", "chrome_update"]) {
+    const chrome = fakeChrome();
+    createBackground(chrome);
+    chrome.runtime.onInstalled.fire({ reason });
+    await tick();
+    assert.equal(chrome.calls.optionsOpened, 0, reason);
+    assert.equal(chrome.calls.menus.length, 2, reason);
+  }
 });
 
 test("action click injects content and sends start", async () => {
@@ -480,4 +504,90 @@ test("a stale play waiting on the stop to the owner does not take ownership from
   deliver(chrome, { type: "pause" }, 1);
   await tick();
   assert.ok(chrome.calls.runtimeMessages.some((m) => m.type === "pause" && m.tabId === 1));
+});
+
+test("unconfigured start shows the setup prompt without calling the engine", async () => {
+  const chrome = fakeChrome({ stored: { preset: "" } });
+  const fetched = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    fetched.push(String(url));
+    throw new Error("no engine call expected");
+  };
+  try {
+    createBackground(chrome);
+    chrome.action.onClicked.fire({ id: 7 });
+    chrome.commands.onCommand.fire("toggle-reading", { id: 8 });
+    chrome.contextMenus.onClicked.fire({ menuItemId: "read-selection" }, { id: 9 });
+    chrome.contextMenus.onClicked.fire({ menuItemId: "read-from-here", linkUrl: "https://a.example/x" }, { id: 10 });
+    await tick();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  // Every trigger injects the content script and asks it for the setup prompt, not a start.
+  assert.deepEqual(
+    chrome.calls.injected.map((o) => o.target.tabId).sort((a, b) => a - b),
+    [7, 8, 9, 10],
+  );
+  assert.deepEqual(
+    chrome.calls.tabMessages.map(({ tabId, msg }) => [tabId, msg.type]).sort((a, b) => a[0] - b[0]),
+    [
+      [7, "setup-prompt"],
+      [8, "setup-prompt"],
+      [9, "setup-prompt"],
+      [10, "setup-prompt"],
+    ],
+  );
+  assert.equal(plays(chrome).length, 0);
+  assert.equal(chrome.calls.offscreenCreated, 0);
+  assert.deepEqual(fetched, []);
+});
+
+test("setup button opens the options page", async () => {
+  const chrome = fakeChrome({ stored: { preset: "" } });
+  createBackground(chrome);
+
+  // A page with the content controller and the real bar; its closed shadow root is captured
+  // by wrapping attachShadow, as in bar.test.mjs.
+  const { document, window } = parseHTML("<!doctype html><html><head></head><body><p>Page</p></body></html>");
+  const roots = [];
+  const realCreate = document.createElement.bind(document);
+  document.createElement = (name, ...rest) => {
+    const el = realCreate(name, ...rest);
+    const attach = el.attachShadow;
+    el.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      roots.push(root);
+      return root;
+    };
+    return el;
+  };
+  const TAB = 5;
+  const tabListeners = [];
+  const contentChrome = {
+    runtime: {
+      // Content-script messages reach the worker with sender.tab set.
+      sendMessage: async (msg) => {
+        deliver(chrome, msg, TAB);
+      },
+      onMessage: { addListener: (fn) => tabListeners.push(fn) },
+    },
+    storage: { sync: { get: async (defaults) => ({ ...defaults }) } },
+  };
+  createController({ doc: document, win: window, chrome: contentChrome, createBar, listVoices: null });
+  // The worker's messages to the tab reach the controller.
+  chrome.tabs.sendMessage = async (tabId, msg) => {
+    chrome.calls.tabMessages.push({ tabId, msg });
+    if (tabId === TAB) for (const fn of tabListeners) fn(msg, {});
+  };
+
+  chrome.action.onClicked.fire({ id: TAB });
+  await tick();
+  assert.equal(roots.length, 1, "setup prompt bar shown");
+  const button = [...roots[0].querySelectorAll("button")].find((b) => b.textContent.trim() === "Set up a speech engine");
+  assert.ok(button, "setup button");
+  button.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true }));
+  await tick();
+  assert.equal(chrome.calls.optionsOpened, 1);
+  assert.equal(plays(chrome).length, 0);
 });

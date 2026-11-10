@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
 import { createBar } from '../bar.mjs';
+import { createController } from '../main.mjs';
 
 // The bar's shadow root is closed, so the page (and the test) cannot reach it through
 // host.shadowRoot. To inspect it, the test wraps attachShadow on the document's elements
@@ -140,4 +141,80 @@ test('autoscroll toggle flips aria-pressed and emits its state', () => {
   bar.setAutoscroll(false);
   assert.equal(btn.getAttribute('aria-pressed'), 'false');
   assert.equal(actions.length, 2);
+});
+
+test('setup prompt shows the message, the setup button and close, no retry', () => {
+  const { document, attached, actions, bar } = setup();
+  const { root } = attached[0];
+  const prompt = root.querySelector('.setup');
+  assert.ok(prompt, 'setup prompt element');
+  assert.equal(prompt.hasAttribute('hidden'), true, 'hidden while not in the setup state');
+  bar.setState('setup');
+  assert.equal(prompt.hasAttribute('hidden'), false);
+  assert.equal(root.querySelector('.setup .message').textContent, 'Lektor needs a speech engine before it can read.');
+  const button = root.querySelector('.setup button.setup-engine');
+  assert.equal(button.textContent.trim(), 'Set up a speech engine');
+  // Yellow call to action, as in the mockup.
+  assert.match(root.querySelector('style').textContent, /\.setup-engine\s*\{[^}]*background:\s*#ffd54a/);
+  const close = root.querySelector('button[aria-label="Close"]');
+  assert.ok(close, 'close button');
+  assert.equal(close.closest('[hidden]'), null, 'close stays visible');
+  // No error text, no Retry, no transport controls.
+  const error = root.querySelector('.error');
+  assert.equal(error.hasAttribute('hidden'), true);
+  assert.equal(error.querySelector('.message').textContent, '');
+  assert.notEqual(root.querySelector('button[aria-label="Retry"]').closest('[hidden]'), null);
+  for (const label of ['Play', 'Previous', 'Next']) {
+    assert.notEqual(root.querySelector(`button[aria-label="${label}"]`).closest('[hidden]'), null, `${label} hidden`);
+  }
+  click(document, button);
+  assert.deepEqual(actions.map(([t]) => t), ['setup']);
+});
+
+test('setup prompt logo is icon B with both sound arcs', () => {
+  const { attached } = setup();
+  const logo = attached[0].root.querySelector('.setup svg');
+  const arcs = [...logo.querySelectorAll('path[stroke="#ffd54a"]')].map((p) => p.getAttribute('d'));
+  assert.deepEqual(arcs, ['M72 46 a14 14 0 0 1 0 24', 'M84 34 a30 30 0 0 1 0 48']);
+});
+
+test('bar may grow to the viewport width minus a margin', () => {
+  // With left: 50% alone the shrink-to-fit width stops at half the viewport.
+  const { attached } = setup();
+  const css = attached[0].root.querySelector('style').textContent;
+  assert.match(css, /\.bar \{[^}]*width: max-content; max-width: calc\(100vw - 32px\)/);
+  assert.match(css, /\.bar \{[^}]*box-sizing: border-box/);
+  // The setup prompt shrinks and wraps inside itself, so × stays on its row.
+  assert.match(css, /\.setup \{[^}]*flex: 1 1 0; min-width: 0/);
+});
+
+test('close removes the setup prompt bar', async () => {
+  const { document, window } = parseHTML('<!doctype html><html><head></head><body><p>Page</p></body></html>');
+  const roots = [];
+  const realCreate = document.createElement.bind(document);
+  document.createElement = (name, ...rest) => {
+    const el = realCreate(name, ...rest);
+    const attach = el.attachShadow;
+    el.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      roots.push({ host: this, root });
+      return root;
+    };
+    return el;
+  };
+  const sent = [];
+  const chrome = {
+    runtime: { sendMessage: async (msg) => { sent.push(msg); }, onMessage: { addListener: () => {} } },
+    storage: { sync: { get: async (defaults) => ({ ...defaults }) } },
+  };
+  const controller = createController({ doc: document, win: window, chrome, createBar, listVoices: null });
+  await controller.handle({ type: 'setup-prompt' });
+  assert.equal(roots.length, 1);
+  const { host, root } = roots[0];
+  assert.equal(host.parentNode, document.body);
+  click(document, root.querySelector('button[aria-label="Close"]'));
+  assert.equal(host.parentNode, null);
+  assert.equal(document.body.children.length, 1);
+  // Nothing was playing: no engine message on close.
+  assert.deepEqual(sent, []);
 });

@@ -1,22 +1,33 @@
 {
-  "name": "omnivoice-reader",
-  "version": "0.1.0",
+  "name": "lektor-tts",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Chrome/Edge MV3 extension that reads pages aloud through an OpenAI-compatible /audio/speech engine",
+  "description": "Lektor TTS: a Chrome/Edge MV3 extension that reads pages aloud through an OpenAI-compatible /audio/speech engine",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "packageManager": "pnpm@10.14.0",
   "scripts": {
-    "test": "node --test \"src/**/*.test.mjs\"",
-    "build": "node build.mjs"
+    "pretest": "node build.mjs",
+    "lint": "eslint .",
+    "test": "node --test \"src/**/*.test.mjs\" \"scripts/__tests__/*.test.mjs\"",
+    "icons": "node scripts/render-icons.mjs",
+    "build": "node build.mjs",
+    "package": "node scripts/package.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@resvg/resvg-js": "^2.6.2",
     "esbuild": "^0.25.0",
-    "linkedom": "^0.18.0"
+    "eslint": "^10.14.0",
+    "fflate": "^0.8.3",
+    "globals": "^17.14.0",
+    "linkedom": "^0.18.0",
+    "playwright": "^1.65.0"
   }
 }

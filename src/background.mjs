@@ -6,7 +6,7 @@
 // only on stamped copies, and this worker ignores them, so nothing is handled twice or loops.
 // Offscreen's `sentence-start` / `state` (no sender.tab) go only to the owning tab.
 import { listVoices as engineListVoices } from "./engine.mjs";
-import { loadSettings as loadStoredSettings } from "./settings.mjs";
+import { isConfigured, loadSettings as loadStoredSettings } from "./settings.mjs";
 
 export const OFFSCREEN_URL = "src/offscreen.html";
 export const CONTENT_FILE = "dist/content.js";
@@ -111,6 +111,14 @@ export function createBackground(chrome, deps = {}) {
       // Restricted pages (chrome://, the web store) cannot be scripted; nothing to read there.
       return;
     }
+    // No engine set up yet: the bar shows the setup prompt instead of starting a session.
+    let settings = null;
+    try {
+      settings = await loadSettings();
+    } catch {
+      // Unreadable settings: start as before, the engine side reports any error.
+    }
+    if (settings && !isConfigured(settings)) return void (await toTab(tabId, { type: "setup-prompt" }));
     await toTab(tabId, { type: "start", ...start });
   }
 
@@ -208,7 +216,13 @@ export function createBackground(chrome, deps = {}) {
     await toTab(tabId, msg);
   }
 
-  chrome.runtime.onInstalled.addListener(() => {
+  chrome.runtime.onInstalled.addListener((details) => {
+    // First run: open the setup screen. Updates keep the user's existing setup.
+    if (details?.reason === "install") {
+      Promise.resolve()
+        .then(() => chrome.runtime.openOptionsPage())
+        .catch(ignore);
+    }
     const create = () => {
       chrome.contextMenus.create({ id: MENU_SELECTION, title: "Read selection", contexts: ["selection"] });
       chrome.contextMenus.create({ id: MENU_FROM_HERE, title: "Read from here", contexts: ["page", "link", "image"] });

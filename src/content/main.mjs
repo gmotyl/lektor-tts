@@ -41,6 +41,8 @@ export function createController({
   // Bumped by every start and every teardown: a start that resumes after a stop or a newer start
   // is superseded and returns without side effects (no stop, no bar change).
   let startToken = 0;
+  // Setup-prompt bar shown while no engine is configured (no session behind it), or null.
+  let setupBar = null;
 
   if (listVoices === undefined) {
     listVoices = () => Promise.resolve(chrome.runtime.sendMessage({ type: 'list-voices' }));
@@ -299,8 +301,30 @@ export function createController({
     return s;
   }
 
+  function closeSetupPrompt() {
+    setupBar?.destroy();
+    setupBar = null;
+  }
+
+  function showSetupPrompt() {
+    stop();
+    // stop() is a no-op without a session: still supersede a start awaiting settings or voices.
+    startToken++;
+    if (setupBar) return;
+    setupBar = makeBar({
+      doc,
+      onAction: (type) => {
+        // Content scripts cannot call chrome.runtime.openOptionsPage; the service worker does.
+        if (type === 'setup') send({ type: 'open-options' });
+        if (type === 'setup' || type === 'close') closeSetupPrompt();
+      },
+    });
+    setupBar.setState('setup');
+  }
+
   // picked is used only for this start; a retry of session.startMsg picks again.
   async function start(msg, picked) {
+    closeSetupPrompt();
     const token = ++startToken;
     const settings = await loadSettings();
     if (token !== startToken) return;
@@ -337,6 +361,8 @@ export function createController({
     switch (msg.type) {
       case 'start':
         return start(msg);
+      case 'setup-prompt':
+        return showSetupPrompt();
       case 'toggle':
         return toggle();
       case 'stop':
