@@ -19,6 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { start as startEngine } from "./fake-engine.mjs";
+import { PRESET_IDS } from "../src/presets.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const STORE = join(root, "store");
@@ -61,16 +62,18 @@ async function launch() {
   };
 }
 
-// What chrome.action.onClicked does for a tab, run inside the service worker.
+// What chrome.action.onClicked does for a tab, run inside the service worker. Mirrors
+// startIn() in src/background.mjs; keep the two in step. The function body is serialized
+// into the worker, so PRESET_IDS is passed in as an argument instead of closed over.
 async function clickAction(worker, url) {
-  await worker.evaluate(async (pageUrl) => {
+  await worker.evaluate(async ({ pageUrl, presetIds }) => {
     const [tab] = await chrome.tabs.query({ url: pageUrl });
     if (!tab) throw new Error(`no tab for ${pageUrl}`);
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["dist/content.js"] });
     const settings = await chrome.storage.sync.get(null);
-    const configured = ["openai", "omnivoice", "other"].includes(settings.preset);
+    const configured = presetIds.includes(settings.preset);
     await chrome.tabs.sendMessage(tab.id, configured ? { type: "start", source: "auto" } : { type: "setup-prompt" });
-  }, url);
+  }, { pageUrl: url, presetIds: PRESET_IDS });
 }
 
 async function shoot(page, path, options = {}) {
