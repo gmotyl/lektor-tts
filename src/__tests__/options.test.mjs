@@ -403,3 +403,18 @@ test("footer has the buy me a coffee link", async () => {
   const inOrder = [...document.querySelectorAll("details#more, footer a")];
   assert.deepEqual(inOrder.map((el) => el.tagName), ["DETAILS", "A"]);
 });
+
+test("an api key typed for one preset is never sent to another", async () => {
+  const { document, calls, page } = await setup({
+    stored: { preset: "openai", baseUrl: "https://api.openai.com/v1", apiKey: "sk-secret", model: "gpt-4o-mini-tts", voice: "coral" },
+    voices: { ok: true, voices: ["x1"] },
+  });
+  assert.equal(document.getElementById("apiKey").value, "sk-secret");
+  choose(document, "other");
+  document.getElementById("baseUrl").value = "http://localhost:9000/v1";
+  await submit(document, page);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].baseUrl, "http://localhost:9000/v1");
+  assert.equal(calls[0].apiKey, "");
+  assert.equal(calls[0].headers?.Authorization, undefined);
+});
