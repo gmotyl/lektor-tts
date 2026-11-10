@@ -195,9 +195,9 @@ export function presetForBaseUrl(baseUrl); // "omnivoice" | "openai" | "other"
 - "more settings is collapsed and model change updates voices"
 - "footer has the buy me a coffee link"
 
-- [ ] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -am "feat: setup screen with engine presets"`
+- [x] **Step 1: Write the failing tests** — Run: `corepack pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `corepack pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -am "feat: setup screen with engine presets"`
 
 ### Task 11: Store package
 

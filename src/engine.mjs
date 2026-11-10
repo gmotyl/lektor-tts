@@ -73,3 +73,13 @@ export async function listVoices(settings, fetchImpl = fetch) {
     return { ok: false, error: err?.message || String(err) };
   }
 }
+
+// Reachability and key check for engines with a fixed voice list (OpenAI): GET /models.
+export async function checkModels(settings, fetchImpl = fetch) {
+  try {
+    await getJson(settings, "/models", fetchImpl);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, status: err?.status, error: err?.message || String(err) };
+  }
+}
