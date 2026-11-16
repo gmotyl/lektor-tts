@@ -128,9 +128,17 @@ function setup({ selection = null, stored = {}, listVoices = null, page = PAGE, 
   );
   installTextRange(document);
   const frames = [];
+  // Closed shadow roots of the bars, recorded so tests can look inside them.
+  const shadowRoots = [];
   const createElement = document.createElement.bind(document);
   document.createElement = (name, ...rest) => {
     const el = createElement(name, ...rest);
+    const attach = el.attachShadow;
+    el.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      shadowRoots.push(root);
+      return root;
+    };
     if (String(name).toLowerCase() === 'iframe') {
       frames.push(el);
       if (autoConnect) queueMicrotask(() => chrome.connect('player'));
@@ -194,7 +202,7 @@ function setup({ selection = null, stored = {}, listVoices = null, page = PAGE, 
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
   };
-  return { document, window, win, chrome, highlighter, highlights, bars, deps, clickListeners, frames, clock };
+  return { document, window, win, chrome, highlighter, highlights, bars, deps, clickListeners, frames, clock, shadowRoots };
 }
 
 // Frame events arrive over the player frame's Port, never as runtime messages.
@@ -966,4 +974,165 @@ test('ignores sentence-start sent over runtime messages', async () => {
   // Commands still arrive that way.
   listener({ type: 'stop' });
   assert.ok(t.c.session === null);
+});
+
+// Selection actions (player bar strip, mockup option A "Text selected").
+
+// A page selection the test can change; collapsing it (as the controller does) empties it.
+function liveSelection() {
+  let current = null;
+  const sel = {
+    get rangeCount() {
+      return current ? 1 : 0;
+    },
+    get isCollapsed() {
+      return !current;
+    },
+    getRangeAt: () => current.getRangeAt(0),
+    removeAllRanges: () => {
+      current = null;
+    },
+    select: (startNode, startOffset, endNode, endOffset) => {
+      current = fakeSelection(startNode, startOffset, endNode, endOffset);
+    },
+  };
+  return sel;
+}
+
+const selectionChange = (document) => document.dispatchEvent(new document.defaultView.Event('selectionchange'));
+const strip = (t) => t.shadowRoots.at(-1)?.querySelector('.selection-actions') ?? null;
+const stripButton = (t, label) => strip(t).querySelector(`button[aria-label="${label}"]`);
+
+function tap(document, el) {
+  const ev = new document.defaultView.Event('click', { bubbles: true, cancelable: true });
+  el.dispatchEvent(ev);
+  return ev;
+}
+
+async function startedWithSelection() {
+  const sel = liveSelection();
+  const t = await started({ selection: () => sel });
+  fromFrame(t.c, { type: 'state', state: 'playing' });
+  return { ...t, sel };
+}
+
+test('selection strip shows above the row during a session', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  assert.equal(strip(t), null, 'debounced: nothing before 150 ms');
+  t.clock.run(150);
+  const s = strip(t);
+  assert.ok(s, 'strip shown');
+  const bar = t.shadowRoots.at(-1).querySelector('.bar');
+  const row = t.shadowRoots.at(-1).querySelector('.row');
+  // Its own block above the row inside the bar, so the row keeps its left offset.
+  assert.ok(s.parentNode === bar);
+  assert.ok(s.nextElementSibling === row);
+  assert.ok(row.parentNode === bar);
+  const buttons = [...s.querySelectorAll('button')];
+  assert.deepEqual(buttons.map((b) => b.textContent.trim()), ['From here', 'Selection']);
+  assert.ok(buttons.every((b) => b.querySelector('svg')), 'inline svg play icons');
+
+  // A selection inside the bar's own host is not a page selection.
+  const t2 = await startedWithSelection();
+  const host = t2.document.querySelector('[data-omnivoice-reader="bar"]');
+  const inner = t2.document.createTextNode('bar text');
+  host.appendChild(inner);
+  t2.sel.select(inner, 0, inner, 3);
+  selectionChange(t2.document);
+  t2.clock.run(150);
+  assert.equal(strip(t2), null);
+});
+
+test('strip hides when the selection collapses', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.ok(strip(t));
+  t.sel.removeAllRanges();
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.equal(strip(t), null);
+});
+
+test('no strip without a session', async () => {
+  const sel = liveSelection();
+  const t = setup({ selection: () => sel });
+  const c = install(t.win, t.deps);
+  const word = t.document.getElementById('p4').firstChild;
+  sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  assert.equal(t.clock.timers.length, 0, 'listener does no work');
+  assert.equal(barHosts(t.document), 0);
+
+  // After the session ends the listener is gone too.
+  await c.handle({ type: 'start', source: 'auto' });
+  c.onAction('close');
+  const before = t.clock.timers.length;
+  selectionChange(t.document);
+  assert.equal(t.clock.timers.length, before);
+  t.clock.run(150);
+  assert.equal(barHosts(t.document), 0);
+});
+
+test('from here starts at the selection start and clears it', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 10, word, 20);
+  selectionChange(t.document);
+  t.clock.run(150);
+  tap(t.document, stripButton(t, 'Read from here'));
+  assert.equal(t.sel.isCollapsed, true, 'selection collapsed');
+  assert.equal(strip(t), null, 'strip gone');
+  await new Promise((r) => setImmediate(r));
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  const play = plays[1];
+  assert.match(play.sentences[play.start][0], /^Paragraph 4 talks/);
+  assert.match(play.sentences[0][0], /Title of the article/, 'reads on through the article');
+  assert.equal(t.c.session.startMsg.source, 'from-here');
+});
+
+test('selection button reads only the selected sentences', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p2').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  tap(t.document, stripButton(t, 'Read selection'));
+  assert.equal(t.sel.isCollapsed, true, 'selection collapsed');
+  assert.equal(strip(t), null, 'strip gone');
+  await new Promise((r) => setImmediate(r));
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  const play = plays[1];
+  assert.equal(play.start, 0);
+  assert.equal(play.sentences.length, 2);
+  assert.match(play.sentences[0][0], /^Paragraph 2 talks/);
+  assert.match(play.sentences[1][0], /^It keeps going/);
+  // Reading ends after the second sentence.
+  fromFrame(t.c, { type: 'sentence-start', index: 1 });
+  fromFrame(t.c, { type: 'state', state: 'ended' });
+  assert.equal(t.c.session.state, 'idle');
+});
+
+test('a tap that clears the selection first still reads it', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p3').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  const button = stripButton(t, 'Read selection');
+  // Touch: the tap collapses the selection before the click lands.
+  t.sel.removeAllRanges();
+  tap(t.document, button);
+  await new Promise((r) => setImmediate(r));
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  assert.match(plays[1].sentences[0][0], /^Paragraph 3 talks/);
+  assert.equal(plays[1].sentences.length, 2);
 });

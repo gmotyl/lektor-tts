@@ -336,3 +336,28 @@ test('bar floats with margins and capped width', () => {
   assert.match(bar, /border-radius:\s*14px/);
   assert.match(bar, /background:\s*#1f2328/);
 });
+
+test('selection strip has two equal-width play buttons above the row', () => {
+  const { document, attached, actions, bar } = setup();
+  const { root } = attached[0];
+  assert.equal(root.querySelector('.selection-actions'), null);
+  bar.showSelectionActions(true);
+  bar.showSelectionActions(true);
+  assert.equal(root.querySelectorAll('.selection-actions').length, 1, 'shown once');
+  const strip = root.querySelector('.selection-actions');
+  assert.ok(strip.nextElementSibling === root.querySelector('.row'), 'strip sits above the row');
+  assert.match(rule(root, '.selection-actions'), /display:\s*flex/);
+  assert.match(rule(root, '.selection-actions button'), /flex:\s*1 1 0/);
+  const [fromHere, selection] = strip.querySelectorAll('button');
+  assert.equal(fromHere.getAttribute('aria-label'), 'Read from here');
+  assert.equal(selection.getAttribute('aria-label'), 'Read selection');
+  // Pressing a strip button must not clear the page selection before the click.
+  const down = new document.defaultView.Event('mousedown', { bubbles: true, cancelable: true });
+  fromHere.dispatchEvent(down);
+  assert.equal(down.defaultPrevented, true);
+  click(document, fromHere);
+  click(document, selection);
+  assert.deepEqual(actions, [['read-from-here', undefined], ['read-selection', undefined]]);
+  bar.showSelectionActions(false);
+  assert.equal(root.querySelector('.selection-actions'), null);
+});

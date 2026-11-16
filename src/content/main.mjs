@@ -24,6 +24,9 @@ const FRAME_LOST = 'Audio player stopped';
 // The frame must connect this soon after injection (a page CSP can block it from loading).
 const CONNECT_TIMEOUT_MS = 5000;
 const FRAME_DID_NOT_START = 'Audio player did not start';
+// Selection actions follow the page selection this long after it stops changing.
+const SELECTION_DEBOUNCE_MS = 150;
+const BAR_SELECTOR = '[data-omnivoice-reader]';
 
 function pageLang(doc, win) {
   return doc.documentElement.getAttribute('lang') || win.navigator?.language || undefined;
@@ -249,9 +252,10 @@ export function createController({
     return out;
   }
 
-  // picked: a pointSource result already computed for msg (Alt+click), reused as is.
+  // picked: sentences already computed for msg (Alt+click, the selection actions), reused as is.
   function pickSentences(msg, picked) {
     const lang = pageLang(doc, win);
+    if (picked && msg.source === 'selection') return { ...picked, start: 0 };
     const selection = win.getSelection?.();
     const hasSelection = !!(selection && selection.rangeCount && !selection.isCollapsed);
     if (msg.source === 'selection' || (msg.source === 'auto' && hasSelection)) {
@@ -312,6 +316,8 @@ export function createController({
     session = null;
     dropFrame(s);
     doc.removeEventListener('click', s.onClick, true);
+    doc.removeEventListener('selectionchange', s.onSelectionChange);
+    clearTimer(s.selectionTimer);
     s.highlighter.clear();
     s.bar.destroy();
   }
@@ -389,11 +395,58 @@ export function createController({
       case 'options':
         // Content scripts cannot call chrome.runtime.openOptionsPage; the service worker does.
         return toWorker({ type: 'open-options' });
+      case 'read-from-here':
+      case 'read-selection':
+        return readSelection(type);
       case 'close':
         return stop();
       default:
         return undefined;
     }
+  }
+
+  const elementOf = (node) => (node && node.nodeType === 1 ? node : node?.parentElement ?? null);
+
+  // The page selection's range when it is non-collapsed and outside the player bar, else null.
+  function pageSelection() {
+    const sel = win.getSelection?.();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    for (const node of [range.startContainer, range.endContainer]) {
+      if (elementOf(node)?.closest?.(BAR_SELECTOR)) return null;
+    }
+    return { sel, range };
+  }
+
+  // Selection actions: "From here" reads on from the selection's start (narrowed to its pane, as
+  // Alt+click does), "Selection" reads exactly the selected sentences. Either clears the selection.
+  function readSelection(type) {
+    const s = session;
+    // A tap on a touch screen can clear the selection before the click: fall back to the range
+    // the strip was shown for.
+    const found = pageSelection() ?? s.shownSelection;
+    clearTimer(s.selectionTimer);
+    s.shownSelection = null;
+    s.bar.showSelectionActions?.(false);
+    if (!found) return undefined;
+    const { range } = found;
+    const sel = win.getSelection?.();
+    const snapshot = { rangeCount: 1, isCollapsed: false, getRangeAt: () => range };
+    let msg;
+    let picked;
+    if (type === 'read-from-here') {
+      msg = { type: 'start', source: 'from-here', target: elementOf(range.startContainer) };
+    } else {
+      msg = { type: 'start', source: 'selection' };
+      // Picked now: the selection is collapsed before the start resumes.
+      picked = { sentences: selectionSentences(doc, snapshot, pageLang(doc, win)), start: 0, container: null };
+    }
+    try {
+      sel?.removeAllRanges?.();
+    } catch {
+      // nothing to collapse
+    }
+    return start(msg, picked);
   }
 
   // Bar choices that are stored preferences (shared with the options page): voice, autoscroll,
@@ -429,6 +482,11 @@ export function createController({
       reinjected: false,
       // Gives up on a frame that does not connect in time.
       connectTimer: null,
+      // Debounced selectionchange handler and its pending timer.
+      onSelectionChange: null,
+      selectionTimer: null,
+      // Page selection ({sel, range}) the strip is shown for, or null.
+      shownSelection: null,
     };
     s.bar = makeBar({ doc, onAction });
     // Capture phase, so the page's own click handlers (links) do not run first.
@@ -465,6 +523,17 @@ export function createController({
       readFrom(picked);
     };
     doc.addEventListener('click', s.onClick, true);
+    s.onSelectionChange = () => {
+      if (session !== s) return;
+      clearTimer(s.selectionTimer);
+      s.selectionTimer = setTimer(() => {
+        s.selectionTimer = null;
+        if (session !== s) return;
+        s.shownSelection = pageSelection();
+        s.bar.showSelectionActions?.(!!s.shownSelection);
+      }, SELECTION_DEBOUNCE_MS);
+    };
+    doc.addEventListener('selectionchange', s.onSelectionChange);
     return s;
   }
 

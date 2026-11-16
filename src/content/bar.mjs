@@ -72,6 +72,9 @@ const STYLE = `
   .setup svg { width: 22px; height: 22px; flex: none; }
   .setup .message { flex: 1; min-width: 160px; }
   .setup-engine { background: #ffd54a; color: #1e2a4a; border-color: #ffd54a; font-weight: 600; }
+  /* Selection actions: their own block above the row, so the row never shifts sideways. */
+  .selection-actions { display: flex; gap: 6px; }
+  .selection-actions button { flex: 1 1 0; gap: 6px; }
 `;
 
 const TEMPLATE = `
@@ -111,6 +114,12 @@ const TEMPLATE = `
   </div>
 `;
 
+// Shown while text outside the bar is selected during a session.
+const SELECTION_ACTIONS = `
+  <button type="button" class="read-from-here" aria-label="Read from here">${ICONS.play}<span>From here</span></button>
+  <button type="button" class="read-selection" aria-label="Read selection">${ICONS.play}<span>Selection</span></button>
+`;
+
 const PLAYING_STATES = new Set(['playing', 'loading']);
 
 export function createBar({ doc = globalThis.document, onAction = () => {} } = {}) {
@@ -134,6 +143,9 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   const message = $('.error .message');
   const player = $('.player');
   const setup = $('.setup');
+  const barEl = $('.bar');
+  const row = $('.row');
+  let selectionActions = null;
 
   const on = (el, type, fn) => el.addEventListener(type, fn);
   on(toggle, 'click', () => onAction('toggle'));
@@ -232,9 +244,29 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     return true;
   }
 
+  function showSelectionActions(show) {
+    if (!show) {
+      selectionActions?.remove();
+      selectionActions = null;
+      return;
+    }
+    if (selectionActions) return;
+    const strip = doc.createElement('div');
+    strip.className = 'selection-actions';
+    strip.innerHTML = SELECTION_ACTIONS;
+    for (const [sel, type] of [['.read-from-here', 'read-from-here'], ['.read-selection', 'read-selection']]) {
+      const button = strip.querySelector(sel);
+      // Keep the page selection: a press on a button would otherwise clear it before the click.
+      on(button, 'mousedown', (e) => e.preventDefault());
+      on(button, 'click', () => onAction(type));
+    }
+    barEl.insertBefore(strip, row);
+    selectionActions = strip;
+  }
+
   function destroy() {
     host.remove();
   }
 
-  return { setState, setVoices, setSpeed, setAutoscroll, mount, attach, destroy };
+  return { setState, setVoices, setSpeed, setAutoscroll, showSelectionActions, mount, attach, destroy };
 }
