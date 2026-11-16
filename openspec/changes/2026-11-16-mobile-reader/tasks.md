@@ -196,9 +196,9 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 **Tests (names only — red first):**
 - "screenshot plan lists the six bar captures"
 
-- [ ] **Step 1: Write the failing test** — Run: `pnpm test` — Expected: FAIL
-- [ ] **Step 2: Implement** — Run: `pnpm test && pnpm screenshots` — Expected: PASS, 6 new PNGs
-- [ ] **Step 3: Commit** — `git commit -m "chore: capture the player bar in screenshots"`
+- [x] **Step 1: Write the failing test** — Run: `pnpm test` — Expected: FAIL
+- [x] **Step 2: Implement** — Run: `pnpm test && pnpm screenshots` — Expected: PASS, 6 new PNGs
+- [x] **Step 3: Commit** — `git commit -m "chore: capture the player bar in screenshots"`
 
 ### Task 9: Visual verification against mockups
 References:
@@ -210,9 +210,9 @@ Acceptance criteria:
 - WHEN a mismatch is found THEN fix it and repeat the comparison; DOM assertions alone do not satisfy visual verification
 - WHEN the surface cannot be reached THEN ask the user for a screenshot; never check this task off without a comparison
 Steps:
-- [ ] Step 1: Capture screenshots per reference and viewport (`pnpm screenshots`); record match/mismatch per Check item
-- [ ] Step 2: Fix mismatches and repeat until every item matches or is an agreed deviation
-- [ ] Step 3: Save screenshots to `openspec/changes/2026-11-16-mobile-reader/verification/` and list them with viewport sizes in the session progress note
+- [x] Step 1: Capture screenshots per reference and viewport (`pnpm screenshots`); record match/mismatch per Check item
+- [x] Step 2: Fix mismatches and repeat until every item matches or is an agreed deviation
+- [x] Step 3: Save screenshots to `openspec/changes/2026-11-16-mobile-reader/verification/` and list them with viewport sizes in the session progress note
 
 ### Task 10: Listing kit, README and version 1.1.0
 
@@ -228,8 +228,8 @@ Steps:
 
 **Verification: non-testable** for the docs — Run: `pnpm test && pnpm package && unzip -l lektor-tts-1.1.0.zip | grep -c offscreen` — Expected: tests PASS, zip written, count `0`.
 
-- [ ] **Step 1:** Write docs and bump the version — Run: the verification command — Expected: as above
-- [ ] **Step 2:** Commit — `git commit -m "docs: 1.1.0 listing kit with Edge Android section"`
+- [x] **Step 1:** Write docs and bump the version — Run: the verification command — Expected: as above
+- [x] **Step 2:** Commit — `git commit -m "docs: 1.1.0 listing kit with Edge Android section"`
 
 ### Task 11: Device verification on Vivaldi Android
 
