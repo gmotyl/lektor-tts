@@ -1228,6 +1228,8 @@ test('refuses a player port from a look-alike URL', async () => {
     'chrome-extension://test/evil/player.html',
     'chrome-extension://other/src/player.html',
     'https://evil.example/src/player.html',
+    // The real player URL embedded as a substring must not pass either.
+    `https://evil.example/?u=${t.chrome.runtime.getURL('src/player.html')}`,
   ]) {
     const port = t.chrome.connect('player', { url });
     assert.equal(port.connected, false, url);
