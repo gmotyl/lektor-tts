@@ -155,9 +155,9 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 - "bar floats with margins and capped width"
 - "voice change from the fold-out restarts the sentence"
 
-- [ ] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -m "feat: compact one-row player bar"`
+- [x] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -m "feat: compact one-row player bar"`
 
 ### Task 7: Selection actions
 
