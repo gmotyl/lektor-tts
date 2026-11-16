@@ -571,3 +571,62 @@ test('voice chosen on the bar is saved as the stored voice', async () => {
   await c.handle({ type: 'start', source: 'auto' });
   assert.equal(ofType(chrome.sent, 'play').at(-1).voice, 'bob');
 });
+
+// Starts a session and records the bar's closed shadow root, so the test can tap its controls.
+async function startedWithBarRoot(opts) {
+  const t = setup(opts);
+  const roots = [];
+  const realCreate = t.document.createElement.bind(t.document);
+  t.document.createElement = (name, ...rest) => {
+    const el = realCreate(name, ...rest);
+    const attach = el.attachShadow;
+    el.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      roots.push(root);
+      return root;
+    };
+    return el;
+  };
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  const tap = (el) => el.dispatchEvent(new t.document.defaultView.Event('click', { bubbles: true, cancelable: true }));
+  return { ...t, c, root: roots[0], tap };
+}
+
+const settle = () => new Promise((r) => setImmediate(r));
+
+test('speed chip cycles presets and saves the default', async () => {
+  const { chrome, root, tap } = await startedWithBarRoot({ stored: { voice: 'alba', speed: 1 } });
+  const chip = root.querySelector('button.speed-chip');
+  assert.equal(chip.textContent.trim(), '1.0×');
+  for (const expected of [1.2, 1.5, 2]) {
+    tap(chip);
+    await settle();
+    assert.deepEqual(chrome.sent.at(-1), { type: 'set-speed', speed: expected });
+    assert.equal(chip.textContent.trim(), `${expected.toFixed(1)}×`);
+    assert.equal(chrome.stored.speed, expected, `${expected} saved as the default`);
+  }
+});
+
+test('voice change from the fold-out restarts the sentence', async () => {
+  const { chrome, root, tap, c, document } = await startedWithBarRoot({ stored: { voice: 'alba', speed: 1 } });
+  c.handle({ type: 'state', state: 'playing' });
+  // Offer a second voice in the select, as an engine voice list would.
+  const voice = root.querySelector('select[aria-label="Voice"]');
+  const opt = document.createElement('option');
+  opt.value = 'bob';
+  opt.textContent = 'bob';
+  voice.appendChild(opt);
+  tap(root.querySelector('button.more'));
+  assert.ok(voice.closest('.fold'), 'voice select lives in the fold-out');
+  assert.equal(voice.closest('[hidden]'), null, 'fold-out is open');
+  // linkedom's select.value is read-only: pick the option the way the user's tap would.
+  for (const o of voice.querySelectorAll('option')) o.removeAttribute('selected');
+  opt.setAttribute('selected', '');
+  assert.equal(voice.value, 'bob');
+  voice.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
+  await settle();
+  // set-voice makes the player drop prefetched audio and restart the current sentence.
+  assert.deepEqual(chrome.sent.at(-1), { type: 'set-voice', voice: 'bob' });
+  assert.equal(chrome.stored.voice, 'bob');
+});

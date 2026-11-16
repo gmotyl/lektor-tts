@@ -212,6 +212,11 @@ export function createController({
       case 'speed':
         session.speed = payload;
         return send({ type: 'set-speed', speed: payload });
+      case 'speed-cycle':
+        // A chip preset is a deliberate pick: remembered as the default speed, unlike the slider.
+        session.speed = payload;
+        saveSetting({ speed: payload });
+        return send({ type: 'set-speed', speed: payload });
       case 'voice':
         session.voice = payload;
         // Remembered for the next session and the options page.
@@ -238,7 +243,8 @@ export function createController({
     }
   }
 
-  // Bar choices that are stored preferences (shared with the options page): voice, autoscroll.
+  // Bar choices that are stored preferences (shared with the options page): voice, autoscroll,
+  // and the speed picked with the chip.
   async function saveSetting(patch) {
     try {
       if (chrome.storage?.sync?.set) await saveSettings(chrome.storage.sync, patch);

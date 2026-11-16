@@ -19,27 +19,51 @@ const ICONS = {
   // Lektor monogram: L with a sound arc.
   logo: '<svg aria-hidden="true" focusable="false" viewBox="0 0 128 128"><rect width="128" height="128" rx="28" fill="#1e2a4a"/><path d="M38 28 V94 H76" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/><path d="M72 46 a14 14 0 0 1 0 24" fill="none" stroke="#ffd54a" stroke-width="8" stroke-linecap="round"/><path d="M84 34 a30 30 0 0 1 0 48" fill="none" stroke="#ffd54a" stroke-width="8" stroke-linecap="round"/></svg>',
   close: svg('<path d="M3.5 2.1 8 6.6l4.5-4.5 1.4 1.4L9.4 8l4.5 4.5-1.4 1.4L8 9.4l-4.5 4.5-1.4-1.4L6.6 8 2.1 3.5z"/>'),
+  // Three dots: open the fold-out with voice, speed slider and autoscroll.
+  more: svg('<circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/>'),
+  // Chevron up: close the fold-out again.
+  collapse: svg('<path d="M8 4.5l5.5 5.5-1.2 1.2L8 6.9l-4.3 4.3-1.2-1.2z"/>'),
 };
+
+// Speed chip presets: a tap moves to the smallest preset above the current speed, and
+// from the top preset (or above it) back to the lowest.
+const SPEED_PRESETS = [0.8, 1.0, 1.2, 1.5, 2.0];
+
+export function nextSpeed(current) {
+  const s = Number(current);
+  return SPEED_PRESETS.find((p) => p > s + 1e-9) ?? SPEED_PRESETS[0];
+}
 
 const STYLE = `
   :host { all: initial; }
+  /* Floating card: 10px side margins, centred and capped so it does not stretch on desktop. */
   .bar {
-    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-    /* left: 50% alone caps the shrink-to-fit width at half the viewport (195 px at 390 px). */
-    box-sizing: border-box; width: max-content; max-width: calc(100vw - 32px);
-    z-index: 2147483647; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-    padding: 8px 12px; border-radius: 10px; background: #1f2328; color: #f6f8fa;
-    font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    position: fixed; left: 10px; right: 10px; bottom: 16px; max-width: 560px; margin: 0 auto;
+    box-sizing: border-box; z-index: 2147483647; display: flex; flex-direction: column; gap: 8px;
+    padding: 8px; border-radius: 14px; background: #1f2328; color: #f6f8fa;
+    font: 15px/1.3 system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   }
-  button svg { display: block; }
+  .row { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
+  .spacer { flex: 1 1 auto; min-width: 0; }
+  button svg { display: block; width: 20px; height: 20px; }
   button, select { font: inherit; color: inherit; background: #2d333b; border: 1px solid #444c56;
-    border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+    border-radius: 10px; padding: 0 10px; cursor: pointer; }
+  /* Touch targets: every control is at least 44x44. */
+  button, select, input { box-sizing: border-box; min-width: 44px; min-height: 44px; }
+  button { display: inline-flex; align-items: center; justify-content: center; flex: none; }
   button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
-    outline: 2px solid #58a6ff; outline-offset: 1px; }
+    outline: 2px solid #58a6ff; outline-offset: 2px; }
   button[aria-pressed="false"] { opacity: 0.55; }
+  .toggle { background: #2f8f7a; border-color: #2f8f7a; min-width: 52px; }
+  .speed-chip { padding: 0 12px; font-weight: 600; }
+  .more, .close { background: transparent; border-color: transparent; }
+  .fold { display: grid; gap: 10px; border-top: 1px solid #30363d; padding-top: 10px; }
+  .fold label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #c9d1d9; }
+  .fold select { min-width: 170px; max-width: 60%; }
+  .fold .speed { flex: 1; min-width: 0; }
   .speed-value { min-width: 2.5em; text-align: right; }
-  .error { flex-basis: 100%; display: flex; gap: 8px; align-items: center; color: #ffb4ab; }
-  .error[hidden] { display: none; }
+  .fold[hidden], .error[hidden] { display: none; }
+  .error { display: flex; gap: 8px; align-items: center; color: #ffb4ab; }
   .error a { color: #58a6ff; }
   .player { display: contents; }
   .player[hidden], .setup[hidden] { display: none; }
@@ -53,21 +77,32 @@ const STYLE = `
 const TEMPLATE = `
   <style>${STYLE}</style>
   <div class="bar" role="toolbar" aria-label="Reader">
-    <div class="player">
-      <button type="button" class="prev" aria-label="Previous" title="Previous sentence (Shift: paragraph)">${ICONS.prev}</button>
-      <button type="button" class="toggle" aria-label="Play">${ICONS.play}</button>
-      <button type="button" class="next" aria-label="Next" title="Next sentence (Shift: paragraph)">${ICONS.next}</button>
-      <select class="voice" aria-label="Voice"></select>
-      <input class="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-label="Speed">
-      <span class="speed-value">1.0&times;</span>
-      <button type="button" class="autoscroll" aria-label="Autoscroll" aria-pressed="true" title="Scroll to the read sentence">${ICONS.autoscroll}</button>
+    <div class="row">
+      <div class="player">
+        <button type="button" class="prev" aria-label="Previous" title="Previous sentence (Shift: paragraph)">${ICONS.prev}</button>
+        <button type="button" class="toggle" aria-label="Play">${ICONS.play}</button>
+        <button type="button" class="next" aria-label="Next" title="Next sentence (Shift: paragraph)">${ICONS.next}</button>
+        <button type="button" class="speed-chip" aria-label="Speed 1.0×, tap for the next preset">1.0&times;</button>
+        <span class="spacer"></span>
+        <button type="button" class="more" aria-label="More settings" aria-expanded="false" aria-controls="fold">${ICONS.more}</button>
+      </div>
+      <div class="setup" role="status" hidden>
+        ${ICONS.logo}
+        <span class="message">Lektor needs a speech engine before it can read.</span>
+        <button type="button" class="setup-engine">Set up a speech engine</button>
+      </div>
+      <button type="button" class="close" aria-label="Close">${ICONS.close}</button>
     </div>
-    <div class="setup" role="status" hidden>
-      ${ICONS.logo}
-      <span class="message">Lektor needs a speech engine before it can read.</span>
-      <button type="button" class="setup-engine">Set up a speech engine</button>
+    <div class="fold" id="fold" hidden>
+      <label>Voice <select class="voice" aria-label="Voice"></select></label>
+      <label>Speed
+        <input class="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-label="Speed">
+        <span class="speed-value">1.0&times;</span>
+      </label>
+      <label>Autoscroll
+        <button type="button" class="autoscroll" aria-label="Autoscroll" aria-pressed="true" title="Scroll to the read sentence">${ICONS.autoscroll}</button>
+      </label>
     </div>
-    <button type="button" class="close" aria-label="Close">${ICONS.close}</button>
     <div class="error" role="alert" hidden>
       <span class="message"></span>
       <a class="options" href="#">Open options</a>
@@ -91,6 +126,9 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   const voice = $('.voice');
   const speed = $('.speed');
   const speedValue = $('.speed-value');
+  const chip = $('.speed-chip');
+  const more = $('.more');
+  const fold = $('.fold');
   const autoscroll = $('.autoscroll');
   const error = $('.error');
   const message = $('.error .message');
@@ -111,6 +149,12 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   on($('.setup-engine'), 'click', () => onAction('setup'));
   on($('.options'), 'click', (e) => { e.preventDefault(); onAction('options'); });
   on(voice, 'change', () => onAction('voice', voice.value));
+  on(chip, 'click', () => {
+    const s = nextSpeed(speed.value);
+    setSpeed(s);
+    onAction('speed-cycle', s);
+  });
+  on(more, 'click', () => setFold(more.getAttribute('aria-expanded') !== 'true'));
   on(speed, 'input', () => {
     const s = Math.round(Number(speed.value) * 10) / 10;
     showSpeed(s);
@@ -118,7 +162,17 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   });
 
   function showSpeed(s) {
-    speedValue.textContent = `${Number(s).toFixed(1)}×`;
+    const label = `${Number(s).toFixed(1)}×`;
+    speedValue.textContent = label;
+    chip.textContent = label;
+    chip.setAttribute('aria-label', `Speed ${label}, tap for the next preset`);
+  }
+
+  function setFold(open) {
+    more.setAttribute('aria-expanded', open ? 'true' : 'false');
+    more.innerHTML = open ? ICONS.collapse : ICONS.more;
+    if (open) fold.removeAttribute('hidden');
+    else fold.setAttribute('hidden', '');
   }
 
   // 'setup': no engine configured yet; only the setup prompt and × are shown.
@@ -128,6 +182,7 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     else player.removeAttribute('hidden');
     if (setupMode) setup.removeAttribute('hidden');
     else setup.setAttribute('hidden', '');
+    if (setupMode) setFold(false);
     const playing = PLAYING_STATES.has(state);
     toggle.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     toggle.innerHTML = playing ? ICONS.pause : ICONS.play;

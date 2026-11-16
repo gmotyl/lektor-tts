@@ -178,14 +178,26 @@ test('setup prompt logo is icon B with both sound arcs', () => {
   assert.deepEqual(arcs, ['M72 46 a14 14 0 0 1 0 24', 'M84 34 a30 30 0 0 1 0 48']);
 });
 
-test('bar may grow to the viewport width minus a margin', () => {
-  // With left: 50% alone the shrink-to-fit width stops at half the viewport.
+test('bar spans the viewport minus side margins, so the setup prompt keeps × on its row', () => {
+  // left and right both set: the card fills the viewport minus 10px each side (left: 50%
+  // alone used to cap the shrink-to-fit width at half the viewport).
   const { attached } = setup();
   const css = attached[0].root.querySelector('style').textContent;
-  assert.match(css, /\.bar \{[^}]*width: max-content; max-width: calc\(100vw - 32px\)/);
+  assert.match(css, /\.bar \{[^}]*left: 10px; right: 10px/);
   assert.match(css, /\.bar \{[^}]*box-sizing: border-box/);
   // The setup prompt shrinks and wraps inside itself, so × stays on its row.
   assert.match(css, /\.setup \{[^}]*flex: 1 1 0; min-width: 0/);
+  const close = attached[0].root.querySelector('button[aria-label="Close"]');
+  assert.equal(close.parentNode, attached[0].root.querySelector('.setup').parentNode, '× shares the row with the prompt');
+});
+
+test('setup state closes the fold-out', () => {
+  const { document, attached, bar } = setup();
+  const { root } = attached[0];
+  click(document, root.querySelector('button.more'));
+  bar.setState('setup');
+  assert.equal(root.querySelector('.fold').hasAttribute('hidden'), true);
+  assert.equal(root.querySelector('button.more').getAttribute('aria-expanded'), 'false');
 });
 
 test('close removes the setup prompt bar', async () => {
@@ -217,4 +229,110 @@ test('close removes the setup prompt bar', async () => {
   assert.equal(document.body.children.length, 1);
   // Nothing was playing: no engine message on close.
   assert.deepEqual(sent, []);
+});
+
+// Compact one-row bar (mockup option A).
+const css = (root) => root.querySelector('style').textContent;
+const rule = (root, selector) => {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = css(root).match(new RegExp(`(?:^|\\}|\\s)${escaped}\\s*\\{([^}]*)\\}`));
+  return m ? m[1] : '';
+};
+
+test('row holds transport controls in mockup order', () => {
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  bar.setState('playing');
+  const row = root.querySelector('.row');
+  assert.ok(row, 'row element');
+  const order = [...row.querySelectorAll('button, .spacer')]
+    .filter((el) => !el.closest('.setup'))
+    .map((el) => el.getAttribute('class').split(' ')[0]);
+  assert.deepEqual(order, ['prev', 'toggle', 'next', 'speed-chip', 'spacer', 'more', 'close']);
+  for (const sel of ['select[aria-label="Voice"]', 'input[aria-label="Speed"]', 'button[aria-label="Autoscroll"]']) {
+    const el = root.querySelector(sel);
+    assert.ok(el, sel);
+    assert.equal(el.closest('.row'), null, `${sel} is not in the row`);
+    assert.ok(el.closest('.fold'), `${sel} is in the fold-out`);
+  }
+});
+
+test('controls are at least 44px and play uses the accent', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  const sizing = rule(root, 'button, select, input');
+  assert.match(sizing, /min-width:\s*44px/);
+  assert.match(sizing, /min-height:\s*44px/);
+  assert.match(rule(root, '.toggle'), /background:\s*#2f8f7a/);
+});
+
+test('row does not wrap', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  assert.match(rule(root, '.row'), /display:\s*flex/);
+  assert.match(rule(root, '.row'), /flex-wrap:\s*nowrap/);
+  assert.match(rule(root, '.spacer'), /flex:\s*1/);
+});
+
+test('speed chip moves from an off-preset value to the next preset', () => {
+  const { document, attached, actions, bar } = setup();
+  const { root } = attached[0];
+  const chip = root.querySelector('button.speed-chip');
+  bar.setSpeed(1.3);
+  assert.equal(chip.textContent.trim(), '1.3×', 'chip shows a slider value');
+  click(document, chip);
+  assert.equal(chip.textContent.trim(), '1.5×');
+  assert.equal(root.querySelector('input[aria-label="Speed"]').value, '1.5');
+  assert.equal(root.querySelector('.speed-value').textContent, '1.5×');
+  bar.setSpeed(2);
+  click(document, chip);
+  assert.equal(chip.textContent.trim(), '0.8×');
+  bar.setSpeed(0.5);
+  click(document, chip);
+  assert.equal(chip.textContent.trim(), '0.8×');
+  assert.deepEqual(actions, [['speed-cycle', 1.5], ['speed-cycle', 0.8], ['speed-cycle', 0.8]]);
+  // The chip follows the slider too.
+  const slider = root.querySelector('input[aria-label="Speed"]');
+  slider.value = '1.7';
+  slider.dispatchEvent(new document.defaultView.Event('input', { bubbles: true }));
+  assert.equal(chip.textContent.trim(), '1.7×');
+});
+
+test('more button folds out voice speed and autoscroll', () => {
+  const { document, attached } = setup();
+  const { root } = attached[0];
+  const more = root.querySelector('button.more');
+  const fold = root.querySelector('.fold');
+  assert.equal(more.getAttribute('aria-label'), 'More settings');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(fold.hasAttribute('hidden'), true);
+  const closedIcon = more.innerHTML;
+  click(document, more);
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  assert.equal(fold.hasAttribute('hidden'), false);
+  assert.ok(more.querySelector('svg'), 'collapse icon is inline svg');
+  assert.notEqual(more.innerHTML, closedIcon, 'icon swaps to collapse');
+  for (const sel of ['select[aria-label="Voice"]', 'input[aria-label="Speed"]', '.speed-value', 'button[aria-label="Autoscroll"]']) {
+    assert.ok(fold.querySelector(sel), `${sel} in the fold-out`);
+  }
+  // The fold-out sits under the row.
+  const row = root.querySelector('.row');
+  assert.equal(row.compareDocumentPosition(fold) & 4, 4);
+  click(document, more);
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(fold.hasAttribute('hidden'), true);
+  assert.equal(more.innerHTML, closedIcon);
+});
+
+test('bar floats with margins and capped width', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  const bar = rule(root, '.bar');
+  assert.match(bar, /position:\s*fixed/);
+  assert.match(bar, /left:\s*10px/);
+  assert.match(bar, /right:\s*10px/);
+  assert.match(bar, /max-width:\s*560px/);
+  assert.match(bar, /margin:\s*0 auto/);
+  assert.match(bar, /border-radius:\s*14px/);
+  assert.match(bar, /background:\s*#1f2328/);
 });
