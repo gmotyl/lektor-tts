@@ -114,10 +114,10 @@ test("manifest requires Chrome 116", () => {
   assert.equal(readManifest().minimum_chrome_version, "116");
 });
 
-test("manifest is named Lektor TTS at version 1.0.0", () => {
+test("manifest is named Lektor TTS at version 1.1.0", () => {
   const m = readManifest();
   assert.equal(m.name, "Lektor TTS");
-  assert.equal(m.version, "1.0.0");
+  assert.equal(m.version, "1.1.0");
   assert.equal(m.action?.default_title, "Lektor TTS");
 });
 

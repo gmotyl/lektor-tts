@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lektor TTS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minimum_chrome_version": "116",
   "description": "Reads the page's article or the selection aloud through an OpenAI-compatible text-to-speech server.",
   "permissions": ["activeTab", "scripting", "contextMenus", "storage"],

@@ -19,6 +19,11 @@ player bar sits on top of the page.
 - **Navigation** by sentence, and by paragraph with Shift.
 - **Highlight** of the current sentence (CSS Custom Highlight API, no DOM changes).
 - **Voice** and **speed** (0.5–2.0) from the bar or the options page.
+- **Screen off**: audio plays in the player frame inside the tab, so reading continues with the
+  screen locked, and the Media Session gives play / pause and previous / next sentence on the
+  lock screen, the media notification, headsets and media keys.
+- **Touch**: a one-row bar on phones; selecting text while reading shows **From here** and
+  **Selection** buttons on the bar.
 
 Polish and English text are segmented into sentences (abbreviations, decimal commas, quotes);
 long sentences are cut into pieces of at most 400 characters, and the next sentences are
@@ -261,16 +266,21 @@ Specs live in `openspec/specs/`; open changes in `openspec/changes/`.
    `pnpm package` refuses).
 2. `pnpm lint && pnpm test` (the test run builds `dist/content.js` first).
 3. `pnpm package` → `lektor-tts-<version>.zip`.
-4. `pnpm screenshots` if the UI changed, and commit the new `store/*.png`.
+4. `pnpm screenshots`, and commit the new `store/*.png` if the UI changed.
 5. Upload the same zip to both stores and paste the texts from
    [`store/listing.md`](store/listing.md):
-   - **Edge:** Partner Center (descriptions, permission justifications, notes for certification).
-   - **Chrome:** Chrome Web Store Developer Dashboard (Store listing tab, Privacy practices tab,
-     Test instructions; see the Chrome section of the listing file).
+   - **Edge Add-ons:** Partner Center (descriptions, permission justifications, notes for
+     certification).
+   - **Chrome Web Store:** Developer Dashboard (Store listing tab, Privacy practices tab, the
+     short Test instructions; see the Chrome section of the listing file).
 
    Each store gets its own reviewers' OpenAI key, pasted only into that store's submission notes,
    never into the repo; revoke it once the release is approved.
 6. Tag the release: `git tag v<version> && git push origin v<version>`.
+7. Once, after the release is live on Edge Add-ons: request the Edge Android allowlist with the
+   value statement, test cases and form link in
+   [`store/listing.md` § Edge Android](store/listing.md#edge-android). Run the test cases on Edge
+   for Android first.
 
 Created by Greg Motyl — [github.com/gmotyl](https://github.com/gmotyl)
 
