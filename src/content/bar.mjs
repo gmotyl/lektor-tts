@@ -224,9 +224,17 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     root.appendChild(el);
   }
 
+  // Puts the host back if the page removed it (a frame in a detached host never loads).
+  // Returns true when it had to.
+  function attach() {
+    if (host.isConnected) return false;
+    (doc.body || doc.documentElement).appendChild(host);
+    return true;
+  }
+
   function destroy() {
     host.remove();
   }
 
-  return { setState, setVoices, setSpeed, setAutoscroll, mount, destroy };
+  return { setState, setVoices, setSpeed, setAutoscroll, mount, attach, destroy };
 }

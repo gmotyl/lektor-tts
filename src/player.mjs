@@ -125,7 +125,7 @@ export function createPlayerFrame({
 // Real player frame only, not when imported by tests.
 if (globalThis.chrome?.tabs?.getCurrent && typeof Audio !== "undefined") {
   globalThis.chrome.tabs.getCurrent().then((tab) => {
-    const port = globalThis.chrome.tabs.connect(tab.id, { name: "player" });
+    const port = globalThis.chrome.tabs.connect(tab.id, { name: "player", frameId: 0 });
     createPlayerFrame({
       port,
       audio: new Audio(),

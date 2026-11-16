@@ -175,7 +175,7 @@ test("real frame connects a player port to its own tab", async () => {
   try {
     await import(`../player.mjs?fresh=${Date.now()}-real`);
     await settle();
-    assert.deepEqual(connects, [[7, { name: "player" }]]);
+    assert.deepEqual(connects, [[7, { name: "player", frameId: 0 }]]);
   } finally {
     delete globalThis.chrome;
     delete globalThis.Audio;

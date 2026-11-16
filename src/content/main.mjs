@@ -2,7 +2,7 @@
 // Owns the reading session in the page: picks the source (article, selection, from-here),
 // hosts the player frame (the extension-origin audio iframe) in the bar's shadow root, sends it
 // `play` with the sentences' pieces over the frame's Port, follows its `sentence-start` /
-// `state` / `error` events, and maps player-bar actions and Alt+click to engine commands.
+// `state` / `error` events (only over that Port), and maps player-bar actions and Alt+click to engine commands.
 
 import { articleSource, paneContainer, pointSource, selectionSentences, sentenceIndexAt } from './source.mjs';
 import * as nav from './nav.mjs';
@@ -21,6 +21,9 @@ const PLAYER_PORT = 'player';
 const PLAYER_PAGE = 'src/player.html';
 const FRAME_STYLE = 'width:1px;height:1px;opacity:0;border:0;position:fixed;pointer-events:none';
 const FRAME_LOST = 'Audio player stopped';
+// The frame must connect this soon after injection (a page CSP can block it from loading).
+const CONNECT_TIMEOUT_MS = 5000;
+const FRAME_DID_NOT_START = 'Audio player did not start';
 
 function pageLang(doc, win) {
   return doc.documentElement.getAttribute('lang') || win.navigator?.language || undefined;
@@ -29,7 +32,7 @@ function pageLang(doc, win) {
 // Tags whose `src` the context menu reports as OnClickData.srcUrl.
 const SRC_SELECTOR = 'img, video, audio, source, iframe, embed';
 
-// deps: {doc, win, chrome, createBar, createHighlighter, listVoices}
+// deps: {doc, win, chrome, createBar, createHighlighter, listVoices, setTimeout, clearTimeout}
 // listVoices: async () => {ok, voices: string[] | null}, asked once per session to pick the
 // first listed voice when none is stored. The default asks the service worker (`list-voices`):
 // a content-script fetch would run with the page's origin (CORS, Local Network Access).
@@ -41,6 +44,8 @@ export function createController({
   createBar: makeBar = createBar,
   createHighlighter: makeHighlighter = createHighlighter,
   listVoices,
+  setTimeout: setTimer = (fn, ms) => globalThis.setTimeout(fn, ms),
+  clearTimeout: clearTimer = (id) => globalThis.clearTimeout(id),
 } = {}) {
   let session = null;
   // Voice listing of the current session (shared by restarts inside it); reset on teardown.
@@ -93,9 +98,17 @@ export function createController({
     s.frame = frame;
     s.port = null;
     s.bar.mount(frame);
+    s.connectTimer = setTimer(() => {
+      if (session !== s || s.frame !== frame || s.port) return;
+      dropFrame(s);
+      s.state = 'error';
+      s.bar.setState('error', FRAME_DID_NOT_START);
+    }, CONNECT_TIMEOUT_MS);
   }
 
   function dropFrame(s) {
+    clearTimer(s.connectTimer);
+    s.connectTimer = null;
     const port = s.port;
     s.port = null;
     s.pending = [];
@@ -122,18 +135,43 @@ export function createController({
     s.bar.setState('error', FRAME_LOST);
   }
 
+  function showSentence(index) {
+    const s = session?.sentences[index];
+    if (!s) return;
+    session.current = index;
+    session.shown = index;
+    session.highlighter.show(s, { scroll: session.autoscroll });
+  }
+
+  function setState(state, error) {
+    if (!session) return;
+    session.state = state;
+    session.bar.setState(state, error);
+    if (state === 'idle') {
+      session.highlighter.clear();
+      session.shown = null;
+    }
+  }
+
+  // Events from the session's player frame; they arrive only over its Port.
   function onFrameEvent(msg) {
     if (!msg || typeof msg.type !== 'string') return;
-    if (msg.type === 'sentence-start') handle(msg);
-    else if (msg.type === 'error') handle({ type: 'state', state: 'error', error: msg.message });
-    else if (msg.type === 'state') handle({ type: 'state', state: msg.state === 'ended' ? 'idle' : msg.state });
+    if (msg.type === 'sentence-start') showSentence(msg.index);
+    else if (msg.type === 'error') setState('error', msg.message);
+    else if (msg.type === 'state') setState(msg.state === 'ended' ? 'idle' : msg.state);
   }
+
+  // The real player frame's URL; other extension pages may not pose as it.
+  const fromPlayerFrame = (port) => {
+    const url = port?.sender?.url;
+    return typeof url === 'string' && url.startsWith(chrome.runtime.getURL(PLAYER_PAGE));
+  };
 
   function onConnect(port) {
     if (port?.name !== PLAYER_PORT) return;
     const s = session;
     // Only the frame this session injected and is waiting for.
-    if (!s || !s.frame || s.port) {
+    if (!s || !s.frame || s.port || !fromPlayerFrame(port)) {
       try {
         port.disconnect();
       } catch {
@@ -142,6 +180,8 @@ export function createController({
       return;
     }
     s.port = port;
+    clearTimer(s.connectTimer);
+    s.connectTimer = null;
     const mine = () => session === s && s.port === port;
     port.onMessage.addListener((msg) => {
       if (mine()) onFrameEvent(msg);
@@ -240,6 +280,8 @@ export function createController({
     s.current = start;
     s.state = 'loading';
     s.bar.setState('loading');
+    // The page removed the bar: put it back, and the frame that went with it is gone.
+    if (s.bar.attach?.() && s.frame) dropFrame(s);
     if (!s.frame) injectFrame(s);
     return send({
       type: 'play',
@@ -384,6 +426,8 @@ export function createController({
       port: null,
       pending: [],
       reinjected: false,
+      // Gives up on a frame that does not connect in time.
+      connectTimer: null,
     };
     s.bar = makeBar({ doc, onAction });
     // Capture phase, so the page's own click handlers (links) do not run first.
@@ -479,6 +523,7 @@ export function createController({
     await play(from);
   }
 
+  // Commands from the service worker. Frame events never come this way.
   function handle(msg) {
     if (!msg || typeof msg.type !== 'string') return undefined;
     switch (msg.type) {
@@ -491,23 +536,6 @@ export function createController({
       case 'stop':
         // Stopped from outside (another tab started, the tab navigates): no echo.
         return teardown();
-      case 'sentence-start': {
-        const s = session?.sentences[msg.index];
-        if (!s) return undefined;
-        session.current = msg.index;
-        session.shown = msg.index;
-        session.highlighter.show(s, { scroll: session.autoscroll });
-        return undefined;
-      }
-      case 'state':
-        if (!session) return undefined;
-        session.state = msg.state;
-        session.bar.setState(msg.state, msg.error);
-        if (msg.state === 'idle') {
-          session.highlighter.clear();
-          session.shown = null;
-        }
-        return undefined;
       default:
         return undefined;
     }
