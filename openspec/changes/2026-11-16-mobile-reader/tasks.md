@@ -124,9 +124,9 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 - "manifest has no offscreen permission"
 - "player frame is web accessible"
 
-- [ ] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `pnpm test && pnpm lint` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -m "feat: drop offscreen document; frame is web accessible"`
+- [x] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `pnpm test && pnpm lint` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -m "feat: drop offscreen document; frame is web accessible"`
 
 ### Task 6: Compact player bar
 
