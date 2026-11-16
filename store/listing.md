@@ -1,8 +1,10 @@
-# Edge Add-ons listing: Lektor TTS
+# Store listing: Lektor TTS
 
-Text to paste into Partner Center for each release. Screenshots and the logo live next to this
-file (`screenshot-reading.png`, `screenshot-setup.png`, `screenshot-unconfigured.png`,
-`logo-300.png`). No API key is ever written here; the certification key is pasted in the
+Text to paste into Edge Partner Center and the Chrome Web Store Developer Dashboard for each
+release. Most sections are shared; the Chrome-only fields are in
+[Chrome Web Store](#chrome-web-store) at the end. Screenshots and images live next to this file
+(`screenshot-reading.png`, `screenshot-setup.png`, `screenshot-unconfigured.png` at 1280x800,
+`logo-300.png`, Chrome promo tiles `promo-small-440x280.png` and `promo-large-1400x560.png`). No API key is ever written here; the certification key is pasted in the
 submission notes only.
 
 ## Name
@@ -89,8 +91,10 @@ https://github.com/gmotyl/lektor-tts/blob/main/PRIVACY.md
 
 ## Notes for certification
 
+Edge: "Notes for certification". Chrome: "Test instructions" (Privacy practices tab).
+
 The OpenAI API key for testing is supplied in these submission notes by the publisher (pasted
-in Partner Center, never stored in the repository).
+in the store dashboard, never stored in the repository).
 
 1. Install the extension. The setup screen ("Lektor TTS", "Speech engine") opens in a new tab.
 2. Pick the "OpenAI" card, paste the API key from these notes, leave the voice as is.
@@ -108,3 +112,40 @@ in Partner Center, never stored in the repository).
 
 The omnivoice-server and "Other server" engines need a server the reviewer does not have; the
 OpenAI engine covers the whole reading flow.
+
+## Chrome Web Store
+
+Fields the Chrome Web Store Developer Dashboard asks for on top of the shared ones above.
+Publisher: the developer account registered for motyl.dev; contact email greg@motyl.dev.
+
+### Store listing tab
+
+- Description: the [Full description](#full-description). The summary under the name comes from
+  `manifest.json` `description` (max 132 characters).
+- Category: Productivity → Tools. Language: English.
+- Screenshots (1280x800): `screenshot-reading.png`, `screenshot-setup.png`,
+  `screenshot-unconfigured.png`.
+- Small promo tile (440x280): `promo-small-440x280.png`. Marquee (1400x560, optional):
+  `promo-large-1400x560.png`.
+- Homepage URL: https://github.com/gmotyl/lektor-tts. Support URL: the [Support URL](#support-url).
+
+### Privacy practices tab
+
+- Single purpose: Lektor TTS reads the text of the current web page (the article or the user's
+  selection) aloud through a text-to-speech engine the user configures, highlighting each
+  sentence as it is spoken.
+- Permission justifications: one field per permission, texts from
+  [Permission justifications](#permission-justifications). The "host permission" field gets both
+  the `localhost` / `127.0.0.1` text and the optional `http://*/*` / `https://*/*` text.
+- Remote code: No. All JavaScript ships in the package; the extension only sends text to and
+  receives audio from the speech server.
+- Data usage: tick "Website content" (the text being read goes to the speech engine the user
+  configured) and "Authentication information" (the user's API key, kept in
+  `chrome.storage.sync` and sent only to that engine as the `Authorization` bearer token). Tick
+  nothing else. Tick all three certifications: not sold to third parties, not used for purposes
+  unrelated to the single purpose, not used for creditworthiness or lending.
+- Privacy policy URL: the [Privacy policy URL](#privacy-policy-url).
+
+### Distribution tab
+
+- Visibility: Public. Regions: all. Free.
