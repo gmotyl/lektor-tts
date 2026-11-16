@@ -5,7 +5,8 @@
 // Writes store/screenshot-setup.png, store/screenshot-unconfigured.png and
 // store/screenshot-reading.png (1280×800 each), plus qa/visual/setup-390.png,
 // qa/visual/setup-1280.png, qa/visual/icon-toolbars.png and the other setup states
-// (setup-{other,omnivoice,success,more}-{1280,390}.png, bar-unconfigured-390.png) for the
+// (setup-{other,omnivoice,success,more}-{1280,390}.png, bar-unconfigured-390.png) and the
+// player bar states (bar-{playing,selection,settings}-{390,1280}.png, see barCaptures()) for the
 // mockup comparison.
 //
 // The toolbar button cannot be clicked in headless Chromium, and chrome.action.onClicked
@@ -139,11 +140,86 @@ async function reading({ context, worker }, articleUrl, engineUrl) {
 
 const WIDTHS = [1280, 390];
 
+const BAR_STATES = ["playing", "selection", "settings"];
+const BAR_VIEWPORTS = { 390: { width: 390, height: 844 }, 1280: { width: 1280, height: 800 } };
+
+// The player bar captures for the mockup comparison: each state at a phone and a desktop
+// viewport, full viewport so the bar's place at the bottom shows. Pure, for the tests.
+export function barCaptures() {
+  return BAR_STATES.flatMap((state) =>
+    Object.entries(BAR_VIEWPORTS).map(([width, viewport]) => ({
+      state,
+      width: Number(width),
+      viewport: { ...viewport },
+      file: `bar-${state}-${width}.png`,
+    })),
+  );
+}
+
 async function atWidths(page, name) {
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
     await shoot(page, join(QA, `${name}-${width}.png`), { fullPage: true });
   }
+}
+
+// Centre of the bar's ⋯ button in page coordinates. The bar lives in a closed shadow root, so
+// the point is derived from its CSS: fixed, 10px side margins, centred, max-width 560px,
+// bottom 16px, padding 8px; with the fold-out closed the row is the bottom block, and ⋯ is
+// the 44px button left of × (also 44px) with a 6px gap. Keep in step with src/content/bar.mjs.
+async function moreButtonPoint(page) {
+  return page.evaluate(() => {
+    const vw = document.documentElement.clientWidth;
+    const vh = globalThis.innerHeight;
+    const barWidth = Math.min(vw - 20, 560);
+    const barRight = (vw + barWidth) / 2;
+    return { x: barRight - 8 - 44 - 6 - 22, y: vh - 16 - 8 - 22 };
+  });
+}
+
+// The player bar during a session: playing, with a phrase selected (selection strip above the
+// row) and with ⋯ opened (fold-out). Runs after reading(), which saved the engine settings.
+async function barStates({ context, worker }, articleUrl) {
+  const byState = Object.groupBy(barCaptures(), (c) => c.state);
+  const captureState = async (page, state) => {
+    for (const { viewport, file } of byState[state]) {
+      await page.setViewportSize(viewport);
+      await page.waitForTimeout(300);
+      await shoot(page, join(QA, file));
+    }
+  };
+  const page = await context.newPage();
+  await page.setViewportSize(BAR_VIEWPORTS[390]);
+  await page.goto(articleUrl);
+  await clickAction(worker, articleUrl);
+  await page.waitForFunction(() => globalThis.CSS?.highlights?.get("reader-current")?.size > 0, null, { timeout: 15000 });
+  await page.mouse.move(0, 0);
+  await captureState(page, "playing");
+
+  // A phrase in a paragraph visible at both widths; the strip shows after the 150ms debounce.
+  await page.evaluate(() => {
+    const p = [...document.querySelectorAll("article p")].find((el) => el.textContent.startsWith("Texts were written to be heard."));
+    const text = p.firstChild;
+    const phrase = "Scrolls had no spaces between words";
+    const start = text.textContent.indexOf(phrase);
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, start + phrase.length);
+    const selection = globalThis.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.waitForTimeout(400);
+  await captureState(page, "selection");
+
+  await page.evaluate(() => globalThis.getSelection().removeAllRanges());
+  await page.waitForTimeout(400);
+  await page.setViewportSize(byState.settings[0].viewport);
+  const more = await moreButtonPoint(page);
+  await page.mouse.click(more.x, more.y);
+  await page.mouse.move(0, 0);
+  await captureState(page, "settings");
+  await page.close();
 }
 
 // The other setup states the mockup shows: each card selected, the connected status after
@@ -234,6 +310,7 @@ export async function main() {
     await unconfiguredBar(browser, articleUrl);
     await setupStates(browser, engine.url);
     await reading(browser, articleUrl, engine.url);
+    await barStates(browser, articleUrl);
     await iconToolbars(browser);
   } finally {
     await browser.close();
