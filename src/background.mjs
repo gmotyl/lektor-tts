@@ -84,8 +84,8 @@ export function createBackground(chrome, deps = {}) {
     } catch {
       // Unreadable settings: start as before, the player frame reports any error.
     }
-    if (settings && !isConfigured(settings)) return void (await toTab(tabId, { type: "setup-prompt" }));
     if (stale()) return;
+    if (settings && !isConfigured(settings)) return void (await toTab(tabId, { type: "setup-prompt" }));
     // One session at a time: the previous owner tab stops before this one starts.
     const previous = await getOwner();
     if (stale()) return;
@@ -133,8 +133,13 @@ export function createBackground(chrome, deps = {}) {
   // The owner tab closing or navigating takes its session (and player frame) with it.
   chrome.tabs.onRemoved.addListener((tabId) => clearOwnerIf(tabId));
 
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo?.status === "loading") return clearOwnerIf(tabId);
+  // A reload or cross-document navigation destroys the content script, but pushState and hash
+  // changes (Slack, Gmail) keep the page and its session alive: the owner tab is told to stop.
+  // On a real navigation nothing receives it, and toTab ignores that failure.
+  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+    if (changeInfo?.status !== "loading" || (await getOwner()) !== tabId) return;
+    setOwner(null);
+    await toTab(tabId, { type: "stop" });
   });
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

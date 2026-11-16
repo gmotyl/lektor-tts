@@ -385,6 +385,32 @@ test('closing the bar tells the service worker the session ended', async () => {
   assert.equal(ofType(u.chrome.sent, 'session-end').length, 0);
 });
 
+test('reaching the end of the text ends ownership', async () => {
+  for (const action of ['next', 'next-paragraph']) {
+    const t = await started();
+    const n = t.c.session.sentences.length;
+    fromFrame(t.c, { type: 'state', state: 'playing' });
+    fromFrame(t.c, { type: 'sentence-start', index: n - 1 });
+    t.chrome.sent.length = 0;
+    t.bars[0].action(action);
+    assert.ok(t.c.session === null, `${action}: session ended`);
+    assert.deepEqual(ofType(t.chrome.sent, 'session-end'), [{ type: 'session-end' }], action);
+  }
+
+  // The setup prompt replacing a running session ends it too.
+  const u = await started();
+  u.chrome.sent.length = 0;
+  u.c.handle({ type: 'setup-prompt' });
+  assert.ok(u.c.session === null, 'setup prompt: session ended');
+  assert.deepEqual(ofType(u.chrome.sent, 'session-end'), [{ type: 'session-end' }], 'setup prompt');
+
+  // Without a session there is nothing to end.
+  const v = setup();
+  const c = install(v.win, v.deps);
+  c.handle({ type: 'setup-prompt' });
+  assert.equal(ofType(v.chrome.sent, 'session-end').length, 0);
+});
+
 test('toggle pauses and resumes', async () => {
   const { chrome, c, bars } = await started();
   fromFrame(c, { type: 'state', state: 'playing' });

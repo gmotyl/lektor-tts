@@ -316,8 +316,12 @@ export function createController({
     s.bar.destroy();
   }
 
+  // Ended in this tab (close, past the last sentence, the setup prompt): the worker drops this
+  // tab's ownership, so the shortcut starts afresh here instead of toggling a session that is
+  // gone. A stop from the worker uses teardown() directly: no echo.
   function stop() {
     if (!session) return;
+    toWorker({ type: 'session-end' });
     teardown();
   }
 
@@ -386,9 +390,6 @@ export function createController({
         // Content scripts cannot call chrome.runtime.openOptionsPage; the service worker does.
         return toWorker({ type: 'open-options' });
       case 'close':
-        // The user ended the session: the worker drops this tab's ownership, so the shortcut
-        // starts afresh here instead of toggling a session that is gone.
-        toWorker({ type: 'session-end' });
         return stop();
       default:
         return undefined;

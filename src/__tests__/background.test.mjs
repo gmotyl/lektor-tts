@@ -227,6 +227,53 @@ test("owner tab navigation clears ownership", async () => {
   assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
 });
 
+test("in-page navigation in the owner tab stops its session", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  // A non-owner tab loading is not told anything.
+  chrome.tabs.onUpdated.fire(5, { status: "loading" });
+  await tick();
+  assert.equal(stopsTo(chrome, 5), 0);
+
+  // pushState / hash change on an SPA: the page (and its session) survive, so it is stopped.
+  // On a real navigation nothing receives the stop; that failure is ignored.
+  chrome.tabs.sendMessage = async (tabId, msg) => {
+    chrome.calls.tabMessages.push({ tabId, msg });
+    throw new Error("Could not establish connection. Receiving end does not exist.");
+  };
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 1);
+
+  // Ownership is gone: a start elsewhere stops nobody, the shortcut on tab 4 starts afresh.
+  chrome.action.onClicked.fire({ id: 6 });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 1);
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
+});
+
+test("a stale start does not show the setup prompt", async () => {
+  const chrome = fakeChrome();
+  // The first start's settings load is slow and finds no engine; the second is configured.
+  let release;
+  const loads = [
+    () => new Promise((r) => (release = r)),
+    async () => ({ preset: "omnivoice" }),
+  ];
+  createBackground(chrome, { loadSettings: () => loads.shift()() });
+  chrome.action.onClicked.fire({ id: 1 });
+  await tick();
+  chrome.action.onClicked.fire({ id: 2 });
+  await tick();
+  release({ preset: "" });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages, [{ tabId: 2, msg: { type: "start", source: "auto" } }]);
+});
+
 test("closing the bar in the owner tab ends its ownership", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
@@ -308,9 +355,13 @@ test("unconfigured start shows the setup prompt without calling the engine", asy
   };
   try {
     createBackground(chrome);
+    // One at a time: of concurrent starts only the newest would show the prompt.
     chrome.action.onClicked.fire({ id: 7 });
+    await tick();
     chrome.commands.onCommand.fire("toggle-reading", { id: 8 });
+    await tick();
     chrome.contextMenus.onClicked.fire({ menuItemId: "read-selection" }, { id: 9 });
+    await tick();
     chrome.contextMenus.onClicked.fire({ menuItemId: "read-from-here", linkUrl: "https://a.example/x" }, { id: 10 });
     await tick();
   } finally {
