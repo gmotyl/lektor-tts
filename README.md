@@ -28,10 +28,12 @@ Lektor collects no data; see [PRIVACY.md](PRIVACY.md).
 
 ## Install
 
-### From Edge Add-ons
+### From a store
 
-Lektor TTS is submitted to Microsoft Edge Add-ons (link coming after review). Install it from
-the store and the setup screen opens in a new tab.
+- **Edge:** [Lektor TTS on Microsoft Edge Add-ons](https://microsoftedge.microsoft.com/addons/detail/lektor-tts/bpmjjpjbldkcnbkjhiclhmkhlemicgod)
+- **Chrome:** submitted to the Chrome Web Store (link coming after review)
+
+Install it and the setup screen opens in a new tab.
 
 ### From source
 
@@ -260,9 +262,14 @@ Specs live in `openspec/specs/`; open changes in `openspec/changes/`.
 2. `pnpm lint && pnpm test` (the test run builds `dist/content.js` first).
 3. `pnpm package` → `lektor-tts-<version>.zip`.
 4. `pnpm screenshots` if the UI changed, and commit the new `store/*.png`.
-5. In Partner Center, upload the zip and paste the texts from
-   [`store/listing.md`](store/listing.md) (descriptions, permission justifications, notes for
-   certification; the OpenAI test key goes only into the submission notes, never into the repo).
+5. Upload the same zip to both stores and paste the texts from
+   [`store/listing.md`](store/listing.md):
+   - **Edge:** Partner Center (descriptions, permission justifications, notes for certification).
+   - **Chrome:** Chrome Web Store Developer Dashboard (Store listing tab, Privacy practices tab,
+     Test instructions; see the Chrome section of the listing file).
+
+   Each store gets its own reviewers' OpenAI key, pasted only into that store's submission notes,
+   never into the repo; revoke it once the release is approved.
 6. Tag the release: `git tag v<version> && git push origin v<version>`.
 
 Created by Greg Motyl — [github.com/gmotyl](https://github.com/gmotyl)

@@ -1,10 +1,10 @@
 # Privacy policy: Lektor TTS
 
-Last updated: 2026-11-10
+Last updated: 2026-11-16
 
 Lektor TTS is a browser extension that reads web pages aloud through a text-to-speech engine
 you choose. This policy covers the extension published as "Lektor TTS" on Microsoft Edge
-Add-ons and built from https://github.com/gmotyl/lektor-tts.
+Add-ons and the Chrome Web Store, built from https://github.com/gmotyl/lektor-tts.
 
 ## No data collected
 
