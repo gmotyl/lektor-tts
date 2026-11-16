@@ -361,3 +361,23 @@ test('selection strip has two equal-width play buttons above the row', () => {
   bar.showSelectionActions(false);
   assert.equal(root.querySelector('.selection-actions'), null);
 });
+
+test('selection strip does not shift the transport row', () => {
+  // The strip stacks above the row (its own line in a column), never beside it, so the transport
+  // controls keep their horizontal position when it appears.
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  assert.match(rule(root, '.bar'), /display:\s*flex/);
+  assert.match(rule(root, '.bar'), /flex-direction:\s*column/);
+  assert.doesNotMatch(rule(root, '.selection-actions'), /display:\s*(contents|inline)/);
+  const row = root.querySelector('.row');
+  const rowParent = row.parentNode;
+  const before = [...rowParent.children].indexOf(row);
+  bar.showSelectionActions(true);
+  const strip = root.querySelector('.selection-actions');
+  assert.ok(strip.parentNode === root.querySelector('.bar'), 'a direct child of the bar');
+  assert.ok(strip.nextElementSibling === row, 'right before the row');
+  assert.ok(row.parentNode === rowParent, 'the row stays where it was');
+  assert.equal([...rowParent.children].indexOf(row), before + 1);
+  assert.equal(row.querySelector('.selection-actions'), null, 'nothing added inside the row');
+});

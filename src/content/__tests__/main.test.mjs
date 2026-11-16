@@ -24,6 +24,7 @@ function fakeSelection(startNode, startOffset, endNode, endOffset) {
   let common = endNode;
   while (common && !ancestors.has(common)) common = common.parentNode;
   range.commonAncestorContainer = common;
+  range.cloneRange = () => ({ ...range });
   return { rangeCount: 1, isCollapsed: false, getRangeAt: () => range };
 }
 
@@ -1135,4 +1136,144 @@ test('a tap that clears the selection first still reads it', async () => {
   assert.equal(plays.length, 2);
   assert.match(plays[1].sentences[0][0], /^Paragraph 3 talks/);
   assert.equal(plays[1].sentences.length, 2);
+});
+
+test('selection strip waits 150 ms', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  t.clock.run(149);
+  assert.ok(strip(t) === null, 'not yet at 149 ms');
+  t.clock.run(150);
+  assert.ok(strip(t), 'shown at 150 ms');
+});
+
+test('closing the session removes the selection listener', async () => {
+  const t = await startedWithSelection();
+  const handler = t.c.session.onSelectionChange;
+  const removed = [];
+  const remove = t.document.removeEventListener;
+  t.document.removeEventListener = (type, fn, opts) => {
+    removed.push([type, fn]);
+    return remove(type, fn, opts);
+  };
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  const pending = t.clock.timers.at(-1);
+  assert.ok(pending.ms === 150 && !pending.done, 'debounce timer pending');
+  t.bars[0].action('close');
+  assert.ok(
+    removed.some(([type, fn]) => type === 'selectionchange' && fn === handler),
+    'selectionchange listener removed',
+  );
+  assert.equal(pending.done, true, 'pending debounce timer cleared');
+});
+
+test('a frame in a removed bar is not reused', async () => {
+  // The page removes the bar before its frame connected: a frame in a detached host never loads.
+  const t = await started({ autoConnect: false });
+  t.document.querySelector('[data-omnivoice-reader="bar"]').remove();
+  await t.c.handle({ type: 'start', source: 'auto' });
+  assert.equal(barHosts(t.document), 1, 'bar back in the page');
+  assert.equal(t.frames.length, 2, 'a fresh frame');
+  assert.ok(t.frames[0].isConnected === false, 'the old frame is dropped');
+  assert.ok(t.frames[1].isConnected === true, 'the new frame is in the document');
+  const port = t.chrome.connect('player');
+  assert.equal(port.connected, true);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+  // The first frame's connect timeout does not kill the new one.
+  t.clock.run(5000);
+  assert.equal(t.c.session.state, 'loading');
+  assert.equal(port.connected, true);
+});
+
+test('a late frame connect after the timeout is disconnected', async () => {
+  const t = await started({ autoConnect: false });
+  t.clock.run(5000);
+  assert.equal(t.c.session.state, 'error');
+  const late = t.chrome.connect('player');
+  assert.equal(late.connected, false, 'late port disconnected');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 0);
+});
+
+test('resume after a lost frame re-attaches the bar', async () => {
+  const t = await started();
+  fromFrame(t.c, { type: 'state', state: 'playing' });
+  fromFrame(t.c, { type: 'sentence-start', index: 3 });
+  t.bars[0].action('toggle');
+  assert.equal(t.c.session.state, 'paused');
+  // The page drops the bar (and the frame in it) while paused.
+  t.document.querySelector('[data-omnivoice-reader="bar"]').remove();
+  t.chrome.ports[0].drop();
+  await settle();
+  assert.equal(t.frames.length, 1, 'no new frame while paused');
+  t.chrome.posted.length = 0;
+  t.bars[0].action('toggle');
+  await settle();
+  assert.equal(barHosts(t.document), 1, 'bar back in the page');
+  assert.equal(t.frames.length, 2);
+  assert.ok(t.frames[1].isConnected === true, 'new frame is in the document');
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 1);
+  assert.equal(plays[0].start, 3);
+});
+
+test('refuses a player port from a look-alike URL', async () => {
+  const t = setup({ autoConnect: false });
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  for (const url of [
+    'chrome-extension://test/evil/player.html',
+    'chrome-extension://other/src/player.html',
+    'https://evil.example/src/player.html',
+  ]) {
+    const port = t.chrome.connect('player', { url });
+    assert.equal(port.connected, false, url);
+  }
+  assert.equal(t.chrome.posted.length, 0);
+  t.chrome.connect('player');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+});
+
+test('retry after an error replays the selected sentences', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p2').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  tap(t.document, stripButton(t, 'Read selection'));
+  await settle();
+  const picked = ofType(t.chrome.posted, 'play').at(-1).sentences;
+  assert.equal(picked.length, 2);
+  fromFrame(t.c, { type: 'sentence-start', index: 1 });
+  fromFrame(t.c, { type: 'error', message: 'Engine said no' });
+  assert.equal(t.c.session.state, 'error');
+  // The page selection is gone by now: retry must not pick again.
+  t.chrome.posted.length = 0;
+  await t.bars[0].action('retry');
+  await settle();
+  const [play] = ofType(t.chrome.posted, 'play');
+  assert.ok(play, 'play sent');
+  assert.deepEqual(play.sentences, picked);
+  assert.equal(play.start, 1);
+});
+
+test('a tap reads the selection shown even after its live range collapsed', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p3').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  // Touch: the tap clears the selection, and the browser collapses its live range in place.
+  const range = t.sel.getRangeAt(0);
+  t.sel.removeAllRanges();
+  Object.assign(range, { endContainer: range.startContainer, endOffset: range.startOffset, commonAncestorContainer: range.startContainer });
+  tap(t.document, stripButton(t, 'Read selection'));
+  await settle();
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  assert.equal(plays[1].sentences.length, 2);
+  assert.match(plays[1].sentences[0][0], /^Paragraph 3 talks/);
 });

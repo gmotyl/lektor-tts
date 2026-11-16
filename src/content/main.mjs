@@ -529,7 +529,9 @@ export function createController({
       s.selectionTimer = setTimer(() => {
         s.selectionTimer = null;
         if (session !== s) return;
-        s.shownSelection = pageSelection();
+        const found = pageSelection();
+        // A snapshot: the selection's own range is live and collapses with it (touch fallback).
+        s.shownSelection = found && { ...found, range: found.range.cloneRange() };
         s.bar.showSelectionActions?.(!!s.shownSelection);
       }, SELECTION_DEBOUNCE_MS);
     };
