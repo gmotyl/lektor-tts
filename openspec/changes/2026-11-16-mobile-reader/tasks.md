@@ -100,9 +100,9 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 - "second disconnect shows the bar error"
 - "close stops and removes the frame"
 
-- [ ] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -m "feat: content script hosts the player frame"`
+- [x] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -m "feat: content script hosts the player frame"`
 
 ### Task 5: Service worker without offscreen; manifest
 
