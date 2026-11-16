@@ -12,10 +12,10 @@ Agreed deviations: none.
 |---|---|---|
 | One row prev · play/pause · next · speed chip · spacer · ⋯ · close, no wrap | match | match |
 | Controls ≥ 44×44px, play/pause accent fill | match | match |
-| Speed chip shows the current value | match | match |
+| Speed chip shows the current value; a tap cycles 0.8 → 1.0 → 1.2 → 1.5 → 2.0 → 0.8 (test "speed chip moves from an off-preset value to the next preset") | match | match |
 | Selection strip: two equal-width "▶ From here" / "▶ Selection" above the row, row not moved | mismatch (no divider line between strip and row) | mismatch (same) |
 | ⋯ fold-out: Voice, Speed slider + value, Autoscroll; ⋯ turns into collapse | mismatch (collapse control transparent, mockup filled; Autoscroll toggle without the "On" label) | mismatch (same) |
-| Floats above the bottom, rounded, `#1f2328`, 10px side margins | match | match (centred, capped) |
+| Floats above the bottom, rounded, `#1f2328`, 10px side margins ("above the browser's bottom toolbar" is not visible in a headless capture; confirmed on the device in Task 11) | match | match (centred, capped) |
 | 1280px: same layout, not full width | — | match (560px max) |
 
 ## Fixes
@@ -32,15 +32,15 @@ Tests: "open fold-out turns more into a filled collapse button", "autoscroll tog
 |---|---|---|
 | One row prev · play/pause · next · speed chip · spacer · ⋯ · close, no wrap | match | match |
 | Controls ≥ 44×44px, play/pause accent fill | match | match |
-| Speed chip shows the current value | match | match |
+| Speed chip shows the current value; a tap cycles 0.8 → 1.0 → 1.2 → 1.5 → 2.0 → 0.8 (test "speed chip moves from an off-preset value to the next preset") | match | match |
 | Selection strip: two equal-width "▶ From here" / "▶ Selection" above the row, row not moved | match | match |
 | ⋯ fold-out: Voice, Speed slider + value, Autoscroll; ⋯ turns into collapse | match | match |
-| Floats above the bottom, rounded, `#1f2328`, 10px side margins | match | match |
+| Floats above the bottom, rounded, `#1f2328`, 10px side margins ("above the browser's bottom toolbar" is not visible in a headless capture; confirmed on the device in Task 11) | match | match |
 | 1280px: same layout, not full width | — | match |
 
 The strip disappearing when the selection collapses is not a static state; it is covered by the tests "strip hides when the selection collapses" and "selection strip has two equal-width play buttons above the row".
 
-Not counted as mismatches: the article, voice name and highlight colours (test page vs. the mockup's sketch), the browser toolbar drawn under the mockup's phone, and the Voice select at 44px high instead of the mockup's 40px (the 44px touch-target rule wins).
+Not counted as mismatches: the article, voice name and highlight colours (test page vs. the mockup's sketch), the browser toolbar drawn under the mockup's phone, the Voice select at 44px high instead of the mockup's 40px (the 44px touch-target rule wins), the Voice select's native arrow instead of the mockup's drawn ▾, and the slightly larger fold-out spacing at 1280px.
 
 ## Files
 
