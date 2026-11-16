@@ -381,3 +381,37 @@ test('selection strip does not shift the transport row', () => {
   assert.equal([...rowParent.children].indexOf(row), before + 1);
   assert.equal(row.querySelector('.selection-actions'), null, 'nothing added inside the row');
 });
+
+// Visual verification against mockup option A (Task 9).
+test('open fold-out turns more into a filled collapse button', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  // Closed, ⋯ is a ghost button like ×; open, the collapse control is a filled button.
+  assert.match(rule(root, '.more, .close'), /background:\s*transparent/);
+  const open = rule(root, '.more[aria-expanded="true"]');
+  assert.match(open, /background:\s*#2d333b/);
+  assert.match(open, /border-color:\s*#444c56/);
+});
+
+test('autoscroll toggle shows On or Off next to its icon', () => {
+  const { document, attached, bar } = setup();
+  const { root } = attached[0];
+  const btn = root.querySelector('button[aria-label="Autoscroll"]');
+  assert.ok(btn.querySelector('svg'), 'icon kept');
+  assert.equal(btn.textContent.trim(), 'On');
+  click(document, btn);
+  assert.equal(btn.textContent.trim(), 'Off');
+  bar.setAutoscroll(true);
+  assert.equal(btn.textContent.trim(), 'On');
+  bar.setAutoscroll(false);
+  assert.equal(btn.textContent.trim(), 'Off');
+  assert.match(rule(root, '.autoscroll'), /gap:\s*6px/);
+});
+
+test('selection strip is divided from the row by a line', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  const strip = rule(root, '.selection-actions');
+  assert.match(strip, /border-bottom:\s*1px solid #30363d/);
+  assert.match(strip, /padding-bottom:\s*8px/);
+});

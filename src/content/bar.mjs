@@ -57,6 +57,9 @@ const STYLE = `
   .toggle { background: #2f8f7a; border-color: #2f8f7a; min-width: 52px; }
   .speed-chip { padding: 0 12px; font-weight: 600; }
   .more, .close { background: transparent; border-color: transparent; }
+  /* Open, ⋯ becomes the collapse control: a filled button, as in the mockup. */
+  .more[aria-expanded="true"] { background: #2d333b; border-color: #444c56; }
+  .autoscroll { gap: 6px; }
   .fold { display: grid; gap: 10px; border-top: 1px solid #30363d; padding-top: 10px; }
   .fold label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #c9d1d9; }
   .fold select { min-width: 170px; max-width: 60%; }
@@ -73,7 +76,7 @@ const STYLE = `
   .setup .message { flex: 1; min-width: 160px; }
   .setup-engine { background: #ffd54a; color: #1e2a4a; border-color: #ffd54a; font-weight: 600; }
   /* Selection actions: their own block above the row, so the row never shifts sideways. */
-  .selection-actions { display: flex; gap: 6px; }
+  .selection-actions { display: flex; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid #30363d; }
   .selection-actions button { flex: 1 1 0; gap: 6px; }
 `;
 
@@ -103,7 +106,7 @@ const TEMPLATE = `
         <span class="speed-value">1.0&times;</span>
       </label>
       <label>Autoscroll
-        <button type="button" class="autoscroll" aria-label="Autoscroll" aria-pressed="true" title="Scroll to the read sentence">${ICONS.autoscroll}</button>
+        <button type="button" class="autoscroll" aria-label="Autoscroll" aria-pressed="true" title="Scroll to the read sentence">${ICONS.autoscroll}<span class="autoscroll-state">On</span></button>
       </label>
     </div>
     <div class="error" role="alert" hidden>
@@ -139,6 +142,7 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   const more = $('.more');
   const fold = $('.fold');
   const autoscroll = $('.autoscroll');
+  const autoscrollState = $('.autoscroll-state');
   const error = $('.error');
   const message = $('.error .message');
   const player = $('.player');
@@ -229,6 +233,7 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
 
   function setAutoscroll(value) {
     autoscroll.setAttribute('aria-pressed', value ? 'true' : 'false');
+    autoscrollState.textContent = value ? 'On' : 'Off';
   }
 
   // Hosts an element (the player frame) inside the closed shadow root, out of the page's reach.
