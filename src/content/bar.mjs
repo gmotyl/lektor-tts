@@ -219,9 +219,14 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     autoscroll.setAttribute('aria-pressed', value ? 'true' : 'false');
   }
 
+  // Hosts an element (the player frame) inside the closed shadow root, out of the page's reach.
+  function mount(el) {
+    root.appendChild(el);
+  }
+
   function destroy() {
     host.remove();
   }
 
-  return { setState, setVoices, setSpeed, setAutoscroll, destroy };
+  return { setState, setVoices, setSpeed, setAutoscroll, mount, destroy };
 }

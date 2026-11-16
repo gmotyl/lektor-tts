@@ -1,7 +1,8 @@
 // Content script entry, bundled to dist/content.js and injected on demand by the service worker.
 // Owns the reading session in the page: picks the source (article, selection, from-here),
-// sends `play` with the sentences' pieces, follows `sentence-start` / `state` from the engine
-// side, and maps player-bar actions and Alt+click to engine messages.
+// hosts the player frame (the extension-origin audio iframe) in the bar's shadow root, sends it
+// `play` with the sentences' pieces over the frame's Port, follows its `sentence-start` /
+// `state` / `error` events, and maps player-bar actions and Alt+click to engine commands.
 
 import { articleSource, paneContainer, pointSource, selectionSentences, sentenceIndexAt } from './source.mjs';
 import * as nav from './nav.mjs';
@@ -14,6 +15,12 @@ export const CONTROLLER_KEY = Symbol.for('omnivoice-reader.controller');
 
 const SETTINGS_DEFAULTS = { voice: DEFAULTS.voice, speed: DEFAULTS.speed, autoscroll: DEFAULTS.autoscroll };
 const PLAYING = new Set(['playing', 'loading']);
+
+// Player frame: opens a Port with this name to its tab; hidden, but still allowed to play audio.
+const PLAYER_PORT = 'player';
+const PLAYER_PAGE = 'src/player.html';
+const FRAME_STYLE = 'width:1px;height:1px;opacity:0;border:0;position:fixed;pointer-events:none';
+const FRAME_LOST = 'Audio player stopped';
 
 function pageLang(doc, win) {
   return doc.documentElement.getAttribute('lang') || win.navigator?.language || undefined;
@@ -48,13 +55,104 @@ export function createController({
     listVoices = () => Promise.resolve(chrome.runtime.sendMessage({ type: 'list-voices' }));
   }
 
-  const send = (msg) => {
+  // Messages for the service worker (open-options); engine commands go to the frame instead.
+  const toWorker = (msg) => {
     try {
       return Promise.resolve(chrome.runtime.sendMessage(msg)).catch(() => {});
     } catch {
       return Promise.resolve();
     }
   };
+
+  // Engine command for the session's player frame. Until the frame connects, a `play` (and what
+  // follows it) waits; commands with no play to follow them are dropped.
+  const send = (msg) => {
+    const s = session;
+    if (!s) return Promise.resolve();
+    if (s.port) {
+      try {
+        s.port.postMessage(msg);
+      } catch {
+        // Port already closed: its onDisconnect handles the lost frame.
+      }
+    } else if (msg.type === 'play') {
+      s.pending = [msg];
+    } else if (s.pending.length) {
+      s.pending.push(msg);
+    }
+    return Promise.resolve();
+  };
+
+  function injectFrame(s) {
+    const frame = doc.createElement('iframe');
+    frame.setAttribute('src', chrome.runtime.getURL(PLAYER_PAGE));
+    frame.setAttribute('allow', 'autoplay');
+    frame.setAttribute('style', FRAME_STYLE);
+    frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('tabindex', '-1');
+    s.frame = frame;
+    s.port = null;
+    s.bar.mount(frame);
+  }
+
+  function dropFrame(s) {
+    const port = s.port;
+    s.port = null;
+    s.pending = [];
+    try {
+      port?.disconnect();
+    } catch {
+      // already closed
+    }
+    s.frame?.remove();
+    s.frame = null;
+  }
+
+  // The frame's Port closed while the session still holds it (the page removed the iframe,
+  // the frame crashed). Playing: re-inject once and replay from the current sentence.
+  function frameLost(s) {
+    dropFrame(s);
+    if (!PLAYING.has(s.state)) return; // paused / ended: the next play injects a new frame
+    if (!s.reinjected) {
+      s.reinjected = true;
+      play(s.current);
+      return;
+    }
+    s.state = 'error';
+    s.bar.setState('error', FRAME_LOST);
+  }
+
+  function onFrameEvent(msg) {
+    if (!msg || typeof msg.type !== 'string') return;
+    if (msg.type === 'sentence-start') handle(msg);
+    else if (msg.type === 'error') handle({ type: 'state', state: 'error', error: msg.message });
+    else if (msg.type === 'state') handle({ type: 'state', state: msg.state === 'ended' ? 'idle' : msg.state });
+  }
+
+  function onConnect(port) {
+    if (port?.name !== PLAYER_PORT) return;
+    const s = session;
+    // Only the frame this session injected and is waiting for.
+    if (!s || !s.frame || s.port) {
+      try {
+        port.disconnect();
+      } catch {
+        // already closed
+      }
+      return;
+    }
+    s.port = port;
+    const mine = () => session === s && s.port === port;
+    port.onMessage.addListener((msg) => {
+      if (mine()) onFrameEvent(msg);
+    });
+    port.onDisconnect.addListener(() => {
+      if (mine()) frameLost(s);
+    });
+    const queued = s.pending;
+    s.pending = [];
+    for (const msg of queued) send(msg);
+  }
 
   async function loadSettings() {
     try {
@@ -142,19 +240,22 @@ export function createController({
     s.current = start;
     s.state = 'loading';
     s.bar.setState('loading');
+    if (!s.frame) injectFrame(s);
     return send({
       type: 'play',
       sentences: s.sentences.map((x) => x.pieces),
       start,
       voice: s.voice,
       speed: s.speed,
+      // Media Session title on the lock screen.
+      title: doc.title || '',
     });
   }
 
   function seek(index) {
     if (!session) return undefined;
-    // After the last sentence ended or an error the engine side has nothing to seek in.
-    if (session.state === 'idle' || session.state === 'error') return play(index);
+    // After the last sentence ended, an error, or a lost frame there is nothing to seek in.
+    if (session.state === 'idle' || session.state === 'error' || !session.frame) return play(index);
     session.current = index;
     return send({ type: 'seek', index });
   }
@@ -164,7 +265,10 @@ export function createController({
     voicesAsked = null;
     if (!session) return;
     const s = session;
+    // Stop first, then remove the frame (and its audio) with the bar.
+    send({ type: 'stop' });
     session = null;
+    dropFrame(s);
     doc.removeEventListener('click', s.onClick, true);
     s.highlighter.clear();
     s.bar.destroy();
@@ -172,7 +276,6 @@ export function createController({
 
   function stop() {
     if (!session) return;
-    send({ type: 'stop' });
     teardown();
   }
 
@@ -183,6 +286,8 @@ export function createController({
       session.bar.setState('paused');
       return send({ type: 'pause' });
     }
+    // A frame lost while paused: resume in a new one.
+    if (session.state === 'paused' && !session.frame) return play(session.current);
     if (session.state === 'paused') {
       session.state = 'playing';
       session.bar.setState('playing');
@@ -231,11 +336,13 @@ export function createController({
         return saveSetting({ autoscroll: session.autoscroll });
       }
       case 'retry':
+        // A retry is the user's call: the frame may be re-injected once again.
+        session.reinjected = false;
         // "Nothing to read" has no sentences to replay: pick them again (the page may have rendered since).
         return sentences.length ? play(current) : start(session.startMsg);
       case 'options':
         // Content scripts cannot call chrome.runtime.openOptionsPage; the service worker does.
-        return send({ type: 'open-options' });
+        return toWorker({ type: 'open-options' });
       case 'close':
         return stop();
       default:
@@ -268,6 +375,12 @@ export function createController({
       highlighter: makeHighlighter({ doc, win }),
       bar: null,
       onClick: null,
+      // Player frame (iframe in the bar's shadow root), its Port once connected, the commands
+      // waiting for that Port, and whether the frame was already re-injected after a loss.
+      frame: null,
+      port: null,
+      pending: [],
+      reinjected: false,
     };
     s.bar = makeBar({ doc, onAction });
     // Capture phase, so the page's own click handlers (links) do not run first.
@@ -321,7 +434,7 @@ export function createController({
       doc,
       onAction: (type) => {
         // Content scripts cannot call chrome.runtime.openOptionsPage; the service worker does.
-        if (type === 'setup') send({ type: 'open-options' });
+        if (type === 'setup') toWorker({ type: 'open-options' });
         if (type === 'setup' || type === 'close') closeSetupPrompt();
       },
     });
@@ -351,6 +464,7 @@ export function createController({
     session.bar.setSpeed(settings.speed);
     session.autoscroll = settings.autoscroll;
     session.shown = null;
+    session.reinjected = false;
     session.bar.setAutoscroll?.(settings.autoscroll);
     if (!sentences.length) {
       // The previous session's audio would otherwise keep playing under the error.
@@ -400,6 +514,7 @@ export function createController({
     handle(msg);
     return false;
   });
+  chrome.runtime.onConnect?.addListener(onConnect);
 
   return {
     handle,
