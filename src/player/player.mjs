@@ -1,4 +1,4 @@
-// Offscreen audio player: walks the sentence queue, plays each sentence's pieces in order
+// Player frame audio player: walks the sentence queue, plays each sentence's pieces in order
 // through one audio element, and reports progress via `sentence-start` / `state` messages.
 //
 // Every navigation (play, seek, setVoice, stop) bumps `generation`; async work from an

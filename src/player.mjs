@@ -39,8 +39,16 @@ export function createPlayerFrame({
     mediaSession.metadata = typeof MediaMetadata === "function" ? new MediaMetadata(meta) : meta;
   }
 
+  // Mirror the player state on the lock-screen controls; `loading` keeps the previous value.
+  const PLAYBACK_STATE = { playing: "playing", paused: "paused", idle: "none", error: "none" };
+  function setPlaybackState(state) {
+    if (!mediaSession || !("playbackState" in mediaSession) || !(state in PLAYBACK_STATE)) return;
+    mediaSession.playbackState = PLAYBACK_STATE[state];
+  }
+
   // Translate the player's events to the Port protocol.
   function emit(msg) {
+    if (msg.type === "state") setPlaybackState(msg.state);
     if (msg.type === "sentence-start") {
       index = msg.index;
       setMetadata();

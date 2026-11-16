@@ -38,7 +38,11 @@ function setup({ stored = {}, speak } = {}) {
   };
   const storage = { sync: { get: async (defaults) => ({ ...defaults, ...stored }), set: async () => {} } };
   const handlers = {};
-  const mediaSession = { metadata: null, setActionHandler: (action, fn) => (handlers[action] = fn) };
+  const mediaSession = {
+    metadata: null,
+    playbackState: "none",
+    setActionHandler: (action, fn) => (handlers[action] = fn),
+  };
   const spoken = [];
   const audio = new FakeAudio();
   createPlayerFrame({
@@ -92,6 +96,8 @@ test("ignores window messages", async () => {
     win.addEventListener(type, fn, opts);
   };
   try {
+    // Fresh import with the spy in place, so a module-level listener is caught too.
+    await import(`../player.mjs?fresh=${Date.now()}-window`);
     const { spoken } = setup();
     // A page can post to the frame's window; only the port is a command channel.
     win.dispatchEvent(Object.assign(new Event("message"), { data: play() }));
@@ -125,16 +131,55 @@ test("next and previous track handlers seek", async () => {
 });
 
 test("play and pause handlers toggle audio and report state", async () => {
-  const { deliver, sent, audio, handlers } = setup();
+  const { deliver, sent, audio, mediaSession, handlers } = setup();
   deliver(play());
   await settle();
+  assert.equal(mediaSession.playbackState, "playing");
   handlers.pause();
   assert.equal(audio.paused, true);
   assert.deepEqual(sent.at(-1), { type: "state", state: "paused" });
+  assert.equal(mediaSession.playbackState, "paused");
   handlers.play();
   await settle();
   assert.equal(audio.paused, false);
   assert.deepEqual(sent.at(-1), { type: "state", state: "playing" });
+  assert.equal(mediaSession.playbackState, "playing");
+  deliver({ type: "stop" });
+  await settle();
+  assert.equal(mediaSession.playbackState, "none");
+});
+
+test("pause right after play is applied after play", async () => {
+  const { deliver, sent, audio } = setup();
+  deliver(play());
+  deliver({ type: "pause" });
+  await settle();
+  assert.equal(audio.paused, true);
+  assert.deepEqual(sent.filter((m) => m.type === "state").at(-1), { type: "state", state: "paused" });
+});
+
+test("real frame connects a player port to its own tab", async () => {
+  const connects = [];
+  const port = { onMessage: { addListener: () => {} }, postMessage: () => {} };
+  globalThis.chrome = {
+    tabs: {
+      getCurrent: async () => ({ id: 7 }),
+      connect: (...args) => {
+        connects.push(args);
+        return port;
+      },
+    },
+    storage: { sync: { get: async (defaults) => ({ ...defaults }), set: async () => {} } },
+  };
+  globalThis.Audio = FakeAudio;
+  try {
+    await import(`../player.mjs?fresh=${Date.now()}-real`);
+    await settle();
+    assert.deepEqual(connects, [[7, { name: "player" }]]);
+  } finally {
+    delete globalThis.chrome;
+    delete globalThis.Audio;
+  }
 });
 
 test("autoplay rejection reports paused", async () => {
@@ -144,6 +189,11 @@ test("autoplay rejection reports paused", async () => {
   await settle();
   assert.deepEqual(sent.at(-1), { type: "state", state: "paused" });
   assert.ok(!sent.some((m) => m.type === "error"));
+  audio.playResult = () => Promise.resolve();
+  deliver({ type: "resume" });
+  await settle();
+  assert.equal(audio.paused, false);
+  assert.deepEqual(sent.at(-1), { type: "state", state: "playing" });
 });
 
 test("engine error is reported over the port", async () => {
