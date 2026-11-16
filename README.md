@@ -55,8 +55,7 @@ Then in the browser:
 After every rebuild, press the reload button on the extension's card; tabs that were already
 reading need a page reload too.
 
-Chrome / Edge 116 is the `minimum_chrome_version`: the offscreen document API needs 109+,
-`chrome.runtime.getContexts` 116+, the CSS Custom Highlight API 105+.
+Chrome / Edge 116 is the `minimum_chrome_version`; the CSS Custom Highlight API needs 105+.
 
 ## Setup
 
@@ -168,10 +167,6 @@ To change the shortcut, open `chrome://extensions/shortcuts` (`edge://extensions
   **Read selection**, or press **Retry** once the page has finished rendering.
 - **Nothing happens on click**: browsers block scripting on `chrome://` / `edge://` pages and the
   Chrome Web Store / Edge Add-ons pages; the extension cannot read there.
-- **Resuming after a long pause**: Chrome closes the hidden audio (offscreen) document about 30 s
-  after sound stops. The extension recreates it on resume or seek (and on a voice / speed change
-  while loading or playing; while paused the change is kept for the next resume), so a pause
-  longer than that resumes from the start of the current sentence rather than mid-sentence.
 - **The page jumps while I scroll around**: turn **Autoscroll** off on the bar (dimmed = off). The
   current sentence stays highlighted; turning it back on scrolls to it right away.
 - **Slack / Gmail reads the sidebar or channel list**: start with **Read from here** (or Alt+click
@@ -215,9 +210,9 @@ File map:
 
 | Path                         | Role                                                                 |
 | ---------------------------- | -------------------------------------------------------------------- |
-| `manifest.json`              | MV3 manifest: permissions, command, options page                     |
-| `src/background.mjs`         | service worker: triggers, on-demand injection of `dist/content.js`, single-tab ownership, message routing, setup screen on install |
-| `src/offscreen.html`, `src/offscreen.mjs` | offscreen document: owns the queue and the `<audio>` element |
+| `manifest.json`              | MV3 manifest: permissions, command, options page, web-accessible player frame |
+| `src/background.mjs`         | service worker: triggers, on-demand injection of `dist/content.js`, single-tab ownership, setup screen on install |
+| `src/player.html`, `src/player.mjs` | player frame (web-accessible iframe in the bar): owns the queue, the `<audio>` element and the Media Session |
 | `src/player/queue.mjs`       | prefetching sentence queue (3 ahead), abortable                      |
 | `src/player/player.mjs`      | plays each sentence's pieces in order, emits progress                |
 | `src/engine.mjs`             | OpenAI-compatible client: `speak`, `listVoices`                      |
@@ -235,25 +230,28 @@ File map:
 | `scripts/screenshots.mjs`, `scripts/fake-engine.mjs` | screenshots against a silent fake `/audio/speech` engine |
 | `store/`                     | listing text (`listing.md`), screenshots, store logo                 |
 
-Messages (`chrome.runtime.sendMessage` / `chrome.tabs.sendMessage`). Content scripts talk to the
-service worker; the worker re-sends engine commands to the offscreen document stamped
-`target: "offscreen"` (offscreen acts only on stamped copies, the worker ignores them):
+Messages. Content scripts and the service worker use `chrome.runtime.sendMessage` /
+`chrome.tabs.sendMessage`; the worker only starts sessions and tracks the owner tab (the tab it
+last started reading in). Audio commands go from the content script to its player frame over a
+Port (`chrome.tabs.connect` from the frame, named `player`), never through the worker:
 
 | type                         | direction                 | payload                                                       |
 | ---------------------------- | ------------------------- | ------------------------------------------------------------- |
-| `play`                       | content → sw → offscreen  | `{sentences: string[][], start, voice, speed}`; the worker adds `tabId` and `settings: {baseUrl, apiKey, model}` |
-| `seek`                       | content → sw → offscreen  | `{index}`                                                     |
-| `pause` / `resume` / `stop`  | content or sw → offscreen | —                                                             |
-| `set-speed`                  | content → sw → offscreen  | `{speed}`                                                     |
-| `set-voice`                  | content → sw → offscreen  | `{voice}`                                                     |
-| `sentence-start`             | offscreen → sw → content  | `{index}`                                                     |
-| `state`                      | offscreen → sw → content  | `{state: "loading"\|"playing"\|"paused"\|"idle"\|"error", error?}` |
+| `play`                       | content → frame (Port)    | `{sentences: string[][], start, voice, speed, title}`; the frame reads the engine settings from storage |
+| `seek`                       | content → frame (Port)    | `{index}`                                                     |
+| `pause` / `resume` / `stop`  | content → frame (Port)    | —                                                             |
+| `set-speed`                  | content → frame (Port)    | `{speed}`                                                     |
+| `set-voice`                  | content → frame (Port)    | `{voice}`                                                     |
+| `sentence-start`             | frame → content (Port)    | `{index}`                                                     |
+| `state`                      | frame → content (Port)    | `{state: "loading"\|"playing"\|"paused"\|"ended"}`            |
+| `error`                      | frame → content (Port)    | `{message}`                                                   |
 | `stop`                       | sw → content              | — (to the previous owner tab when another tab starts; content tears down without echoing) |
 | `toggle`                     | sw → content              | — (shortcut on the reading tab)                               |
 | `start`                      | sw → content              | `{source: "auto"\|"selection"\|"from-here", linkUrl?, srcUrl?}` |
 | `setup-prompt`               | sw → content              | — (no engine set up: show the setup prompt instead of reading) |
 | `list-voices`                | content → sw              | — ; answered via `sendResponse` with `{ok, voices: string[] \| null}` (`null`: reachable, no list) or `{ok: false, error}` |
 | `open-options`               | content → sw              | — (content scripts cannot open the options page)              |
+| `session-end`                | content → sw              | — (the user closed the bar: the tab no longer owns a session) |
 
 Specs live in `openspec/specs/`; open changes in `openspec/changes/`.
 

@@ -55,7 +55,7 @@ export function createController({
     listVoices = () => Promise.resolve(chrome.runtime.sendMessage({ type: 'list-voices' }));
   }
 
-  // Messages for the service worker (open-options); engine commands go to the frame instead.
+  // Messages for the service worker (open-options, session-end); engine commands go to the frame instead.
   const toWorker = (msg) => {
     try {
       return Promise.resolve(chrome.runtime.sendMessage(msg)).catch(() => {});
@@ -344,6 +344,9 @@ export function createController({
         // Content scripts cannot call chrome.runtime.openOptionsPage; the service worker does.
         return toWorker({ type: 'open-options' });
       case 'close':
+        // The user ended the session: the worker drops this tab's ownership, so the shortcut
+        // starts afresh here instead of toggling a session that is gone.
+        toWorker({ type: 'session-end' });
         return stop();
       default:
         return undefined;

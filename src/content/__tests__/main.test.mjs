@@ -335,6 +335,19 @@ test('bar actions map to engine messages', async () => {
   assert.deepEqual(t.chrome.posted.at(-1), { type: 'stop' });
 });
 
+test('closing the bar tells the service worker the session ended', async () => {
+  const t = await started();
+  t.chrome.sent.length = 0;
+  t.bars[0].action('close');
+  assert.deepEqual(ofType(t.chrome.sent, 'session-end'), [{ type: 'session-end' }]);
+
+  // Stopped from outside (another tab took over): no echo to the worker.
+  const u = await started();
+  u.chrome.sent.length = 0;
+  u.c.handle({ type: 'stop' });
+  assert.equal(ofType(u.chrome.sent, 'session-end').length, 0);
+});
+
 test('toggle pauses and resumes', async () => {
   const { chrome, c, bars } = await started();
   c.handle({ type: 'state', state: 'playing' });
