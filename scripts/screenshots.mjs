@@ -177,6 +177,27 @@ async function moreButtonPoint(page) {
   });
 }
 
+// Height of the player bar in CSS px. The host ([data-omnivoice-reader]) is an inline box with
+// a fixed-position child behind a closed shadow root, so its own rect is empty; hits inside the
+// shadow tree retarget to the host, so walk up the bar's centre line from the bottom until
+// elementFromPoint leaves it.
+async function barHeight(page) {
+  return page.evaluate(() => {
+    const host = document.querySelector("[data-omnivoice-reader]");
+    if (!host) return 0;
+    const x = document.documentElement.clientWidth / 2;
+    let top = null;
+    let bottom = null;
+    for (let y = globalThis.innerHeight - 1; y >= 0; y--) {
+      const onBar = document.elementFromPoint(x, y) === host;
+      if (onBar && bottom === null) bottom = y;
+      if (onBar) top = y;
+      else if (bottom !== null) break;
+    }
+    return bottom === null ? 0 : bottom - top + 1;
+  });
+}
+
 // The player bar during a session: playing, with a phrase selected (selection strip above the
 // row) and with ⋯ opened (fold-out). Runs after reading(), which saved the engine settings.
 async function barStates({ context, worker }, articleUrl) {
@@ -216,8 +237,18 @@ async function barStates({ context, worker }, articleUrl) {
   await page.waitForTimeout(400);
   await page.setViewportSize(byState.settings[0].viewport);
   const more = await moreButtonPoint(page);
+  const closedHeight = await barHeight(page);
   await page.mouse.click(more.x, more.y);
   await page.mouse.move(0, 0);
+  await page.waitForTimeout(300);
+  const openHeight = await barHeight(page);
+  if (!(closedHeight > 0 && openHeight > closedHeight)) {
+    throw new Error(
+      `The ⋯ click did not open the fold-out: bar height ${closedHeight}px before, ${openHeight}px after ` +
+        `(click at ${more.x},${more.y}; keep moreButtonPoint in step with src/content/bar.mjs).`,
+    );
+  }
+  console.log(`fold-out opened: bar ${closedHeight}px -> ${openHeight}px`);
   await captureState(page, "settings");
   await page.close();
 }
