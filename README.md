@@ -216,8 +216,8 @@ File map:
 | `manifest.json`              | MV3 manifest: permissions, command, options page                     |
 | `src/background.mjs`         | service worker: triggers, on-demand injection of `dist/content.js`, single-tab ownership, message routing, setup screen on install |
 | `src/offscreen.html`, `src/offscreen.mjs` | offscreen document: owns the queue and the `<audio>` element |
-| `src/offscreen/queue.mjs`    | prefetching sentence queue (3 ahead), abortable                      |
-| `src/offscreen/player.mjs`   | plays each sentence's pieces in order, emits progress                |
+| `src/player/queue.mjs`       | prefetching sentence queue (3 ahead), abortable                      |
+| `src/player/player.mjs`      | plays each sentence's pieces in order, emits progress                |
 | `src/engine.mjs`             | OpenAI-compatible client: `speak`, `listVoices`                      |
 | `src/presets.mjs`            | engine presets (OpenAI, omnivoice-server, other) and OpenAI voices per model |
 | `src/settings.mjs`           | defaults, load / save, preset migration, speed clamp                 |

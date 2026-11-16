@@ -4,8 +4,8 @@
 // Engine settings ({baseUrl, apiKey, model}) arrive with each `play`: the service worker
 // reads chrome.storage, which offscreen documents cannot use (they only get chrome.runtime).
 import { speak as engineSpeak } from "./engine.mjs";
-import { createQueue } from "./offscreen/queue.mjs";
-import { createPlayer } from "./offscreen/player.mjs";
+import { createQueue } from "./player/queue.mjs";
+import { createPlayer } from "./player/player.mjs";
 
 const ENGINE_DEFAULTS = { baseUrl: "http://localhost:8892/v1", apiKey: "", model: "tts-1" };
 
