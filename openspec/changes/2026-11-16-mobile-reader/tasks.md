@@ -180,9 +180,9 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 - "from here starts at the selection start and clears it"
 - "selection button reads only the selected sentences"
 
-- [ ] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -m "feat: selection actions in the player bar"`
+- [x] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -m "feat: selection actions in the player bar"`
 
 ### Task 8: Bar captures in the screenshot script
 
