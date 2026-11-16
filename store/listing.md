@@ -139,8 +139,10 @@ Publisher: the developer account registered for motyl.dev; contact email greg@mo
   the `localhost` / `127.0.0.1` text and the optional `http://*/*` / `https://*/*` text.
 - Remote code: No. All JavaScript ships in the package; the extension only sends text to and
   receives audio from the speech server.
-- Data usage: tick only "Website content" (the text being read goes to the user's own speech
-  engine). Tick all three certifications: not sold to third parties, not used for purposes
+- Data usage: tick "Website content" (the text being read goes to the speech engine the user
+  configured) and "Authentication information" (the user's API key, kept in
+  `chrome.storage.sync` and sent only to that engine as the `Authorization` bearer token). Tick
+  nothing else. Tick all three certifications: not sold to third parties, not used for purposes
   unrelated to the single purpose, not used for creditworthiness or lending.
 - Privacy policy URL: the [Privacy policy URL](#privacy-policy-url).
 
