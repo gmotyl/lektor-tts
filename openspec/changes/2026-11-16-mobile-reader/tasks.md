@@ -33,7 +33,7 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 
 **Verification: non-testable** — sideload spike 0.0.3 in Vivaldi Android on the S23 Ultra — Expected: (a) the 1×1, visually hidden frame (`width:1px;height:1px;opacity:0;position:fixed`) autostarts and keeps playing with the screen locked; (b) the lock screen or notification shade shows a media notification with working pause/next. Record the result in the session progress note. If (a) fails → the design fallback applies: Task 4 gives the frame 1px of visible space inside the bar. If (b) fails → Task 3 still ships, and the Edge Android test cases (Task 10) drop the lock-screen-controls case.
 
-- [ ] **Step 1:** Build spike 0.0.3, send it with `tailscale file cp`, and have Greg run the 4-point check
+- [x] **Step 1:** Build spike 0.0.3, send it with `tailscale file cp`, and have Greg run the 4-point check
 - [ ] **Step 2:** Record pass/fail per point in the progress note and commit the spike repo
 
 ### Task 2: Move queue and player modules
@@ -43,8 +43,8 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 
 **Verification: non-testable** — Run: `pnpm test && pnpm lint` — Expected: PASS with the moved tests green and only import paths changed (`git diff -M --stat` shows renames).
 
-- [ ] **Step 1:** `git mv` the files and fix imports — Run: `pnpm test` — Expected: PASS
-- [ ] **Step 2:** Commit — `git commit -m "refactor: move audio queue and player to src/player"`
+- [x] **Step 1:** `git mv` the files and fix imports — Run: `pnpm test` — Expected: PASS
+- [x] **Step 2:** Commit — `git commit -m "refactor: move audio queue and player to src/player"`
 
 ### Task 3: Player frame module with Media Session
 
