@@ -74,7 +74,13 @@ export function createPlayer({
     const g = generation;
     Promise.resolve(audio.play()).catch((err) => {
       // play() interrupted by pause/new src rejects with AbortError — not a failure.
-      if (g === generation && !isAbort(err)) fail(err);
+      if (g !== generation || isAbort(err)) return;
+      // Autoplay refused (no user gesture): wait paused, so a tap on resume plays it.
+      if (err?.name === "NotAllowedError") {
+        paused = true;
+        return setState("paused");
+      }
+      fail(err);
     });
   }
 
