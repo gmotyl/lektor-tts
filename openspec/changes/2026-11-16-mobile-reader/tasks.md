@@ -15,12 +15,12 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 **Contract — Port protocol** (name `"player"`, opened by the frame):
 ```js
 // content script → frame
-{ type: "play", sentences: string[], start: number, voice: string, speed: number }
+{ type: "play", sentences: string[][], start: number, voice: string, speed: number, title?: string }  // pieces per sentence
 { type: "seek", index: number } | { type: "pause" } | { type: "resume" } | { type: "stop" }
 { type: "set-speed", speed: number } | { type: "set-voice", voice: string }
 // frame → content script
 { type: "sentence-start", index: number }
-{ type: "state", state: "playing" | "paused" | "ended" }
+{ type: "state", state: "loading" | "playing" | "paused" | "ended" }
 { type: "error", message: string }
 ```
 
@@ -75,9 +75,9 @@ All commands run in the worktree root. `pnpm test` runs `node build.mjs` first.
 - "autoplay rejection reports paused"
 - "engine error is reported over the port"
 
-- [ ] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
-- [ ] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
-- [ ] **Step 3: Commit** — `git commit -m "feat: player frame with media session"`
+- [x] **Step 1: Write the failing tests** — Run: `pnpm test` — Expected: FAIL
+- [x] **Step 2: Minimal implementation** — Run: `pnpm test` — Expected: PASS
+- [x] **Step 3: Commit** — `git commit -m "feat: player frame with media session"`
 
 ### Task 4: Content script hosts the frame
 
