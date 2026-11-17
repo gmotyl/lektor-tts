@@ -235,8 +235,8 @@ Steps:
 
 **Verification: non-testable** — send `lektor-tts-1.1.0.zip` to the phone (`tailscale file cp … galaxy-s23-ultra:`), remove 1.0.0, sideload 1.1.0, and run the Edge Android test cases from `store/listing.md` — Expected: every case passes. Also: the toolbar start with a selection reads only the selection (or the result is recorded as "selection lost on toolbar tap; selection actions cover it"); the bar fits one row. Results go to `openspec/changes/2026-11-16-mobile-reader/verification/device.md`.
 
-- [ ] **Step 1:** Greg runs the cases; record per-case results in `verification/device.md`
-- [ ] **Step 2:** Fix failures as new tasks only if a scenario from the delta specs fails; commit `verification/`
+- [x] **Step 1:** Greg runs the cases; record per-case results in `verification/device.md`
+- [x] **Step 2:** Fix failures as new tasks only if a scenario from the delta specs fails; commit `verification/`
 
 ### Task 12: Release (Greg, manual)
 
