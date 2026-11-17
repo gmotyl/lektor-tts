@@ -642,6 +642,39 @@ test('autoscroll toggle on the bar saves the setting and stops scrolling', async
   assert.equal(ofType(chrome.posted, 'autoscroll').length, 0, 'nothing sent to the engine');
 });
 
+test("the highlighter gets the bar's top edge", async () => {
+  const t = setup();
+  let opts = null;
+  t.deps.createHighlighter = (o) => {
+    opts = o;
+    return t.highlighter;
+  };
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  t.shadowRoots.at(-1).querySelector('.bar').getBoundingClientRect = () => ({ top: 740, bottom: 800, height: 60, left: 10, right: 380 });
+  assert.equal(typeof opts?.obscuredBottom, 'function');
+  assert.equal(opts.obscuredBottom(), 740);
+});
+
+test('opening the fold-out re-checks the current sentence', async () => {
+  const { document, shadowRoots, highlighter, highlights, c } = await started();
+  fromFrame(c, { type: 'sentence-start', index: 1 });
+  const more = shadowRoots.at(-1).querySelector('button.more');
+  const before = highlights.length;
+  more.dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
+  // The bar grew: the sentence is shown again, scrolling only if it is now under the bar.
+  assert.equal(highlights.length, before + 1);
+  assert.ok(highlighter.shown === c.session.sentences[1]);
+  assert.equal(highlighter.opts.scroll, true);
+  // Closing it shrinks the bar: nothing to re-check.
+  more.dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(highlights.length, before + 1);
+  // Autoscroll off: opening it leaves the page alone.
+  c.session.autoscroll = false;
+  more.dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(highlights.length, before + 1);
+});
+
 // A Slack-like page with fake layout, and "Read from here" on the hovered element.
 function slackSetup(hoveredId) {
   const t = setup({ page: SLACK });
@@ -1060,6 +1093,25 @@ test('selection strip shows above the row during a session', async () => {
   selectionChange(t2.document);
   t2.clock.run(150);
   assert.equal(strip(t2), null);
+});
+
+test('showing the selection strip re-checks the current sentence', async () => {
+  const t = await startedWithSelection();
+  fromFrame(t.c, { type: 'sentence-start', index: 1 });
+  const before = t.highlights.length;
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.ok(strip(t));
+  assert.equal(t.highlights.length, before + 1);
+  assert.ok(t.highlighter.shown === t.c.session.sentences[1]);
+  assert.equal(t.highlighter.opts.scroll, true);
+  // The strip was already shown: a grown selection does not re-check again.
+  t.sel.select(word, 0, word, 12);
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.equal(t.highlights.length, before + 1);
 });
 
 test('strip hides when the selection collapses', async () => {

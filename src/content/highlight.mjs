@@ -9,6 +9,8 @@ const NAME = 'reader-current';
 const STYLE_ID = 'omnivoice-reader-highlight-style';
 // Gap kept between the sentence and the bar's top edge.
 const BAR_MARGIN = 16;
+// Gap kept above a sentence too tall for the visible area, aligned to its top.
+const TOP_MARGIN = 16;
 const STYLE = `::highlight(${NAME}) { background-color: rgba(255, 213, 0, 0.45); color: inherit; }`;
 
 // Defaults are read from globalThis at call time (not import time), so the module loads in
@@ -96,7 +98,8 @@ export function createHighlighter({
   // the window. But when the block is taller than a scrollport it sits in, centring the block can
   // leave the sentence itself hidden, so scroll each level by the sentence's own offset instead:
   // every vertically overflowing ancestor from the innermost outwards, then the window, each
-  // centring the sentence within it unless it is already fully visible there.
+  // centring the sentence within it unless it is already fully visible there (a sentence taller
+  // than the level is aligned to its top instead, so its start is readable).
   // The offsets are computed up front from one set of measurements: scrolling a box moves the
   // sentence by the scrolled amount but never moves the box's ancestors, so the sentence's next
   // position is plain arithmetic. That keeps every step smooth (no re-measuring a rect that a
@@ -127,7 +130,10 @@ export function createHighlighter({
       let bottom = rect.bottom;
       for (const level of levels) {
         if (top >= level.top && bottom <= level.bottom) continue;
-        const delta = Math.round((top + bottom) / 2 - level.centre);
+        // Too tall to fit: centring would hide its start, so its top goes near the top instead.
+        const tall = bottom - top > level.bottom - level.top;
+        const delta = Math.round(tall ? top - (level.top + TOP_MARGIN) : (top + bottom) / 2 - level.centre);
+        if (!delta) continue;
         level.scrollBy({ top: delta, behavior: 'smooth' });
         top -= delta;
         bottom -= delta;

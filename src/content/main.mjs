@@ -138,6 +138,13 @@ export function createController({
     s.bar.setState('error', FRAME_LOST);
   }
 
+  // With autoscroll on, shows the highlighted sentence again, which scrolls only when it is
+  // off-screen: after autoscroll is turned back on, or when the bar grows over it.
+  function recheckSentence(s) {
+    const sentence = s.shown != null ? s.sentences[s.shown] : null;
+    if (s.autoscroll && sentence) s.highlighter.show(sentence, { scroll: true });
+  }
+
   function showSentence(index) {
     const s = session?.sentences[index];
     if (!s) return;
@@ -382,11 +389,12 @@ export function createController({
       case 'autoscroll': {
         session.autoscroll = payload !== false;
         // Turned back on: bring the sentence being read into view now, not at the next one.
-        if (session.autoscroll && session.shown != null && sentences[session.shown]) {
-          session.highlighter.show(sentences[session.shown], { scroll: true });
-        }
+        recheckSentence(session);
         return saveSetting({ autoscroll: session.autoscroll });
       }
+      case 'fold':
+        // The fold-out opened and the bar grew: the sentence may now be under it.
+        return payload ? recheckSentence(session) : undefined;
       case 'retry':
         // A retry is the user's call: the frame may be re-injected once again.
         session.reinjected = false;
@@ -531,9 +539,12 @@ export function createController({
         s.selectionTimer = null;
         if (session !== s) return;
         const found = pageSelection();
+        const wasShown = !!s.shownSelection;
         // A snapshot: the selection's own range is live and collapses with it (touch fallback).
         s.shownSelection = found && { ...found, range: found.range.cloneRange() };
         s.bar.showSelectionActions?.(!!s.shownSelection);
+        // The strip appeared and the bar grew: the sentence may now be under it.
+        if (s.shownSelection && !wasShown) recheckSentence(s);
       }, SELECTION_DEBOUNCE_MS);
     };
     doc.addEventListener('selectionchange', s.onSelectionChange);

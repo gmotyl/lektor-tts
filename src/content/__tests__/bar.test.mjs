@@ -108,6 +108,22 @@ test("reports the bar's top edge", () => {
   assert.equal(bar.topEdge(), null);
 });
 
+test('topEdge is null for a zero-height bar', () => {
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  // A collapsed card (e.g. not laid out yet) covers nothing.
+  root.querySelector('.bar').getBoundingClientRect = () => ({ top: 800, bottom: 800, height: 0, left: 10, right: 380 });
+  assert.equal(bar.topEdge(), null);
+});
+
+test('opening the fold-out emits the fold action', () => {
+  const { document, attached, actions } = setup();
+  const more = attached[0].root.querySelector('button.more');
+  click(document, more);
+  click(document, more);
+  assert.deepEqual(actions, [['fold', true], ['fold', false]]);
+});
+
 test('bar host is a custom element reset against page CSS', () => {
   const { attached } = setup();
   const { host, root } = attached[0];

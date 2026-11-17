@@ -233,3 +233,24 @@ test('no bar uses the full viewport', () => {
     assert.equal(winScrolls.length, 0);
   }
 });
+
+test('a sentence taller than the area above the bar is aligned to its top', () => {
+  const { winScrolls, makeSentence, hl } = withBar(740);
+  // 900px tall, the visible area only 724: centring would hide its start above the window.
+  hl.show(makeSentence('p2', { top: 1000, bottom: 1900, left: 0, right: 100 }));
+  // Its top (1000) moves to 16px below the top of the area.
+  assert.deepEqual(winScrolls, [{ top: 984, behavior: 'smooth' }]);
+});
+
+test('a scroll box reaching under the bar is clipped to the area above it', () => {
+  const { document, win, scrolls, winScrolls, makeSentence, hl } = withBar(740);
+  // #root fills the window (rows 0..800), so its bottom 76px sit under the bar.
+  const boxScrolls = scrollBox(win, document.getElementById('root'), { top: 0, height: 800 });
+  document.getElementById('p1').getBoundingClientRect = () => ({ top: -500, bottom: 2500, height: 3000, left: 0, right: 100 });
+  hl.show(makeSentence('p1', { top: 1900, bottom: 1920, left: 0, right: 100 }));
+  assert.equal(scrolls.length, 0);
+  // Sentence centre (1910) moves to the centre of rows 0..724 (362), not of the full box (400).
+  assert.deepEqual(boxScrolls, [{ top: 1548, behavior: 'smooth' }]);
+  // Already above the bar after the box scrolls: the window stays put.
+  assert.equal(winScrolls.length, 0);
+});

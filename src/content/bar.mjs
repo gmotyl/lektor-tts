@@ -170,7 +170,12 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     setSpeed(s);
     onAction('speed-cycle', s);
   });
-  on(more, 'click', () => setFold(more.getAttribute('aria-expanded') !== 'true'));
+  on(more, 'click', () => {
+    const open = more.getAttribute('aria-expanded') !== 'true';
+    setFold(open);
+    // The bar grows or shrinks: main re-checks the sentence being read against its new top edge.
+    onAction('fold', open);
+  });
   on(speed, 'input', () => {
     const s = Math.round(Number(speed.value) * 10) / 10;
     showSpeed(s);
