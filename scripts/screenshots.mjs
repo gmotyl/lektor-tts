@@ -6,8 +6,11 @@
 // store/screenshot-reading.png (1280×800 each), plus qa/visual/setup-390.png,
 // qa/visual/setup-1280.png, qa/visual/icon-toolbars.png and the other setup states
 // (setup-{other,omnivoice,success,more}-{1280,390}.png, bar-unconfigured-390.png) and the
-// player bar states (bar-{playing,selection,settings}-{390,1280}.png, see barCaptures()) for the
-// mockup comparison.
+// player bar states (bar-{playing,selection,settings}-{390,1280}.png and bar-tip-390.png, see
+// barCaptures()) for the mockup comparison.
+//
+// Each run starts from a fresh profile, so the one-time start-point tip would show in the first
+// session; the tip flag is seeded before any capture and cleared only for bar-tip-390.png.
 //
 // The toolbar button cannot be clicked in headless Chromium, and chrome.action.onClicked
 // cannot be fired from outside, so the script runs the same path in the service worker as the
@@ -144,17 +147,21 @@ const BAR_STATES = ["playing", "selection", "settings"];
 const BAR_VIEWPORTS = { 390: { width: 390, height: 844 }, 1280: { width: 1280, height: 800 } };
 
 // The player bar captures for the mockup comparison: each state at a phone and a desktop
-// viewport, full viewport so the bar's place at the bottom shows. Pure, for the tests.
+// viewport, full viewport so the bar's place at the bottom shows, plus the one-time start-point
+// tip at the phone width. Pure, for the tests.
 export function barCaptures() {
-  return BAR_STATES.flatMap((state) =>
-    Object.entries(BAR_VIEWPORTS).map(([width, viewport]) => ({
-      state,
-      width: Number(width),
-      viewport: { ...viewport },
-      file: `bar-${state}-${width}.png`,
-    })),
-  );
+  const capture = (state, width) => ({
+    state,
+    width,
+    viewport: { ...BAR_VIEWPORTS[width] },
+    file: `bar-${state}-${width}.png`,
+  });
+  return [...BAR_STATES.flatMap((state) => Object.keys(BAR_VIEWPORTS).map((width) => capture(state, Number(width)))), capture("tip", 390)];
 }
+
+// The tip shows once per device (chrome.storage.local "tipShown"). A fresh profile has no flag.
+const setTipShown = (worker, shown) =>
+  worker.evaluate((value) => (value ? chrome.storage.local.set({ tipShown: true }) : chrome.storage.local.remove("tipShown")), shown);
 
 async function atWidths(page, name) {
   for (const width of WIDTHS) {
@@ -253,6 +260,24 @@ async function barStates({ context, worker }, articleUrl) {
   await page.close();
 }
 
+// The one-time start-point tip above the row: clear the flag, start a session and capture well
+// within the tip's 8 seconds. Starting the session sets the flag again.
+async function barTip({ context, worker }, articleUrl) {
+  const [{ viewport, file }] = barCaptures().filter((c) => c.state === "tip");
+  await setTipShown(worker, false);
+  const page = await context.newPage();
+  await page.setViewportSize(viewport);
+  await page.goto(articleUrl);
+  await clickAction(worker, articleUrl);
+  await page.waitForFunction(() => globalThis.CSS?.highlights?.get("reader-current")?.size > 0, null, { timeout: 15000 });
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(300);
+  const shown = await worker.evaluate(() => chrome.storage.local.get({ tipShown: false }));
+  if (!shown.tipShown) throw new Error("The start-point tip did not show (tipShown flag not set).");
+  await shoot(page, join(QA, file));
+  await page.close();
+}
+
 // The other setup states the mockup shows: each card selected, the connected status after
 // "Save and test" (omnivoice-server pointed at the fake engine) and "More settings" opened.
 // Saves settings, so it runs after the unconfigured bar.
@@ -336,12 +361,15 @@ export async function main() {
   });
   const browser = await launch();
   try {
+    // No tip in the store and bar captures; barTip() shows it on purpose.
+    await setTipShown(browser.worker, true);
     const articleUrl = `${engine.url}${ARTICLE}`;
     await setupScreens(browser);
     await unconfiguredBar(browser, articleUrl);
     await setupStates(browser, engine.url);
     await reading(browser, articleUrl, engine.url);
     await barStates(browser, articleUrl);
+    await barTip(browser, articleUrl);
     await iconToolbars(browser);
   } finally {
     await browser.close();

@@ -1377,22 +1377,27 @@ async function startedWithTip({ local = {}, touch = false, selection } = {}) {
 
 test('first session shows the Alt+click tip once on desktop', async () => {
   const t = await startedWithTip();
-  assert.equal(tipText(t), DESKTOP_TIP);
-  assert.equal(t.local.tipShown, true, 'flag written when shown');
+  assert.ok(tipText(t) === DESKTOP_TIP, `tip text: ${tipText(t)}`);
+  assert.ok(t.local.tipShown === true, 'flag written when shown');
   // A thin line above the row, with its own close button.
   const row = t.shadowRoots.at(-1).querySelector('.row');
   assert.ok(tip(t).nextElementSibling === row);
   assert.ok(tip(t).querySelector('button[aria-label="Close tip"]'));
+  // The × is a 44x44 touch target like every bar control: no rule shrinks it below that.
+  const style = t.shadowRoots.at(-1).querySelector('style').textContent;
+  assert.ok(/button, select, input \{[^}]*min-width: 44px; min-height: 44px;/.test(style), 'base 44px rule');
+  const closeRule = style.match(/\.tip \.tip-close \{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(!/min-(width|height)/.test(closeRule), `tip × keeps 44px: ${closeRule}`);
   // The next session on this device has no tip.
   await t.c.handle({ type: 'stop' });
   await t.c.handle({ type: 'start', source: 'auto' });
   await flush();
-  assert.equal(tip(t), null);
+  assert.ok(!tip(t), 'no tip');
 });
 
 test('touch devices get the selection tip', async () => {
   const t = await startedWithTip({ touch: true });
-  assert.equal(tipText(t), TOUCH_TIP);
+  assert.ok(tipText(t) === TOUCH_TIP, `tip text: ${tipText(t)}`);
 });
 
 test('tip hides after 8 seconds, on ×, or on the first bar action', async () => {
@@ -1401,18 +1406,18 @@ test('tip hides after 8 seconds, on ×, or on the first bar action', async () =>
   a.clock.run(7999);
   assert.ok(tip(a), 'still shown before 8 s');
   a.clock.run(8000);
-  assert.equal(tip(a), null);
+  assert.ok(!tip(a), 'no tip');
 
   // On ×: the tip goes, the session stays.
   const b = await startedWithTip();
   tap(b.document, tip(b).querySelector('button[aria-label="Close tip"]'));
-  assert.equal(tip(b), null);
+  assert.ok(!tip(b), 'no tip');
   assert.ok(b.c.session, 'session still running');
 
   // On the first bar action.
   const c = await startedWithTip();
   tap(c.document, c.shadowRoots.at(-1).querySelector('button.toggle'));
-  assert.equal(tip(c), null);
+  assert.ok(!tip(c), 'no tip');
 
   // The selection strip wins over the tip.
   const sel = liveSelection();
@@ -1423,16 +1428,16 @@ test('tip hides after 8 seconds, on ×, or on the first bar action', async () =>
   selectionChange(d.document);
   d.clock.run(150);
   assert.ok(strip(d));
-  assert.equal(tip(d), null);
+  assert.ok(!tip(d), 'no tip');
 });
 
 test('tip is not shown again after it was shown', async () => {
   const t = await startedWithTip({ local: { tipShown: true } });
-  assert.equal(tip(t), null);
+  assert.ok(!tip(t), 'no tip');
   // No storage.local at all: no tip either.
   const u = await started();
   await flush();
-  assert.equal(tip(u), null);
+  assert.ok(!tip(u), 'no tip');
 });
 
 test('showing the tip re-checks the current sentence', async () => {

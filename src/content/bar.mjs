@@ -78,11 +78,12 @@ const STYLE = `
   /* Selection actions: their own block above the row, so the row never shifts sideways. */
   .selection-actions { display: flex; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid #30363d; }
   .selection-actions button { flex: 1 1 0; gap: 6px; }
-  /* One-time tip: a thin line above the row, with a small ×. */
+  /* One-time tip: a thin line above the row. Its × keeps the 44x44 touch target; negative
+     block margins let it overhang the bar padding so the line stays thin. */
   .tip { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; border-bottom: 1px solid #30363d;
     font-size: 13px; color: #c9d1d9; }
   .tip .tip-text { flex: 1; min-width: 0; }
-  .tip .tip-close { min-width: 32px; min-height: 32px; padding: 0; background: transparent; border-color: transparent; }
+  .tip .tip-close { margin: -8px -4px -8px 0; padding: 0; background: transparent; border-color: transparent; }
   .tip .tip-close svg { width: 14px; height: 14px; }
 `;
 

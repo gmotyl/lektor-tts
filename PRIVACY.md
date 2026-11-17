@@ -35,6 +35,10 @@ While a page is being read, the extension also keeps the id of the browser tab b
 in the right tab. No page text or settings are kept there. Session storage lives in memory on
 your device only, is never synced, and is cleared when the browser closes.
 
+The extension's local storage (`chrome.storage.local`) holds one per-device flag recording that
+the one-time start-point tip was shown, so it is not shown again. No page text or settings are
+kept there, and it is never synced.
+
 ## No analytics, no remote code
 
 Lektor contains no analytics, tracking, advertising or crash reporting, and it loads no remote

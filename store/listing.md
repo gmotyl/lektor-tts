@@ -91,7 +91,9 @@ https://github.com/gmotyl/lektor-tts/blob/main/PRIVACY.md
 - `storage`: keeps the user's settings (engine preset, server address, API key, model, voice,
   speed, autoscroll) in `chrome.storage.sync`, and the id of the tab currently reading in
   `chrome.storage.session` (in memory only, cleared when the browser closes), so that "one tab
-  reads at a time" survives a background worker restart.
+  reads at a time" survives a background worker restart. In `chrome.storage.local` it keeps one
+  per-device flag recording that the one-time start-point tip was shown (no page text, no
+  settings).
 - Host permissions `http://localhost/*` and `http://127.0.0.1/*`: reach a speech server running
   on the user's own computer (omnivoice-server listens on `http://localhost:8892/v1`) without a
   prompt.
