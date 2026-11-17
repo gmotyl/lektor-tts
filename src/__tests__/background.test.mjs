@@ -380,6 +380,37 @@ test("of two starts racing, the newest wins", async () => {
   assert.deepEqual(chrome.calls.tabMessages, [{ tabId: 2, msg: { type: "start", source: "auto" } }]);
 });
 
+test("a start superseded while stopping the previous owner is not delivered", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 1 });
+  await tick();
+  chrome.calls.tabMessages.length = 0;
+
+  // Tab 1's stop is slow: a newer start in tab 3 runs to completion meanwhile.
+  const send = chrome.tabs.sendMessage;
+  let release;
+  chrome.tabs.sendMessage = (tabId, msg) => {
+    if (tabId === 1 && msg.type === "stop" && !release) {
+      chrome.calls.tabMessages.push({ tabId, msg });
+      return new Promise((r) => (release = r));
+    }
+    return send(tabId, msg);
+  };
+  chrome.action.onClicked.fire({ id: 2 });
+  await tick();
+  chrome.action.onClicked.fire({ id: 3 });
+  await tick();
+  release();
+  await tick();
+  assert.equal(
+    chrome.calls.tabMessages.filter(({ tabId, msg }) => tabId === 2 && msg.type === "start").length,
+    0,
+    "the superseded start in tab 2 is dropped",
+  );
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 3, msg: { type: "start", source: "auto" } });
+});
+
 test("a tab that cannot be scripted does not take ownership", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);

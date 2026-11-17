@@ -91,6 +91,8 @@ export function createBackground(chrome, deps = {}) {
     if (stale()) return;
     setOwner(tabId);
     if (previous !== null && previous !== tabId) await toTab(previous, { type: "stop" });
+    // A newer start may have taken over while the previous owner was stopping.
+    if (stale()) return;
     await toTab(tabId, { type: "start", ...start });
   }
 
