@@ -149,6 +149,8 @@ A voice chosen on the bar is saved as the default (the next session and Options 
 the **Autoscroll** toggle (shared with the Options checkbox), and a speed picked with the chip. The
 speed slider applies to the current session only; its default lives in Options.
 **Alt+click** a paragraph to jump there (also after the last sentence, until you close the bar).
+On a touch screen, select text and use **From here** or **Selection** on the bar instead. The first
+session on a device shows a one-time tip on the bar naming the start point for that device.
 Alt+click outside what is being read (another pane of an app page) starts reading that pane there;
 so does Alt+click on a message while the whole app page is read, which narrows reading to that pane.
 Only one tab reads at a time: starting in another tab stops the first one. Navigating or closing

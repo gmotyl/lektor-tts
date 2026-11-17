@@ -78,6 +78,12 @@ const STYLE = `
   /* Selection actions: their own block above the row, so the row never shifts sideways. */
   .selection-actions { display: flex; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid #30363d; }
   .selection-actions button { flex: 1 1 0; gap: 6px; }
+  /* One-time tip: a thin line above the row, with a small ×. */
+  .tip { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; border-bottom: 1px solid #30363d;
+    font-size: 13px; color: #c9d1d9; }
+  .tip .tip-text { flex: 1; min-width: 0; }
+  .tip .tip-close { min-width: 32px; min-height: 32px; padding: 0; background: transparent; border-color: transparent; }
+  .tip .tip-close svg { width: 14px; height: 14px; }
 `;
 
 const TEMPLATE = `
@@ -123,9 +129,13 @@ const SELECTION_ACTIONS = `
   <button type="button" class="read-selection" aria-label="Read selection">${ICONS.play}<span>Selection</span></button>
 `;
 
+// Desktop only: a touch screen has no Alt+click.
+const FROM_HERE_TITLE = 'Read from here — or Alt+click any paragraph';
+
 const PLAYING_STATES = new Set(['playing', 'loading']);
 
-export function createBar({ doc = globalThis.document, onAction = () => {} } = {}) {
+// touch: a coarse-pointer device; it gets no Alt+click tooltip.
+export function createBar({ doc = globalThis.document, onAction = () => {}, touch = false } = {}) {
   const host = doc.createElement(HOST_TAG);
   host.setAttribute('data-omnivoice-reader', 'bar');
   host.setAttribute('style', HOST_STYLE);
@@ -150,6 +160,7 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   const barEl = $('.bar');
   const row = $('.row');
   let selectionActions = null;
+  let tip = null;
 
   const on = (el, type, fn) => el.addEventListener(type, fn);
   on(toggle, 'click', () => onAction('toggle'));
@@ -261,6 +272,8 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
       return;
     }
     if (selectionActions) return;
+    // The strip wins over the tip: both above the row would be too much.
+    showTip(null);
     const strip = doc.createElement('div');
     strip.className = 'selection-actions';
     strip.innerHTML = SELECTION_ACTIONS;
@@ -270,8 +283,26 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
       on(button, 'mousedown', (e) => e.preventDefault());
       on(button, 'click', () => onAction(type));
     }
+    if (!touch) strip.querySelector('.read-from-here').setAttribute('title', FROM_HERE_TITLE);
     barEl.insertBefore(strip, row);
     selectionActions = strip;
+  }
+
+  // One-time tip line above the row; null removes it. Its × reports 'tip-close'. Returns true
+  // when the tip is on screen (never while the selection strip is).
+  function showTip(text) {
+    tip?.remove();
+    tip = null;
+    if (text == null || selectionActions) return false;
+    const line = doc.createElement('div');
+    line.className = 'tip';
+    line.setAttribute('role', 'note');
+    line.innerHTML = `<span class="tip-text"></span><button type="button" class="tip-close" aria-label="Close tip">${ICONS.close}</button>`;
+    line.querySelector('.tip-text').textContent = text;
+    on(line.querySelector('.tip-close'), 'click', () => onAction('tip-close'));
+    barEl.insertBefore(line, row);
+    tip = line;
+    return true;
   }
 
   function destroy() {
@@ -286,5 +317,5 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     return r && r.height > 0 ? r.top : null;
   }
 
-  return { setState, setVoices, setSpeed, setAutoscroll, showSelectionActions, mount, attach, destroy, topEdge };
+  return { setState, setVoices, setSpeed, setAutoscroll, showSelectionActions, showTip, mount, attach, destroy, topEdge };
 }

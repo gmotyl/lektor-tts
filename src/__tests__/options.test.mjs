@@ -53,7 +53,7 @@ function fakeFetch({ status = 200, body = { data: [] } } = {}) {
   return { calls, impl };
 }
 
-async function setup({ stored, grant, voices, fetch } = {}) {
+async function setup({ stored, grant, voices, fetch, matchMedia } = {}) {
   const { document } = parseHTML(HTML);
   const chrome = fakeChrome({ stored, grant });
   const calls = [];
@@ -61,7 +61,7 @@ async function setup({ stored, grant, voices, fetch } = {}) {
     calls.push(settings);
     return typeof voices === "function" ? voices(settings) : voices;
   };
-  const page = initOptions({ doc: document, chrome, listVoices, fetch: fetch?.impl });
+  const page = initOptions({ doc: document, chrome, listVoices, fetch: fetch?.impl, matchMedia });
   await page.ready;
   return { document, chrome, calls, page };
 }
@@ -467,4 +467,23 @@ test("a denied or invalid save clears a stale connected status", async () => {
   assert.match(denied.document.getElementById("message").textContent, /permission/);
   assert.equal(status(denied.document), "");
   assert.equal(denied.chrome.writes.length, 0);
+});
+
+test("setup hint matches the device", async () => {
+  const DESKTOP =
+    "Try it: open an article and click the Lektor icon, or select text and press Alt+Shift+R. Alt+click a paragraph to read from there.";
+  const TOUCH = "Try it: open an article and tap the Lektor icon in the toolbar. Select text to read from there.";
+  const cases = [
+    [undefined, DESKTOP],
+    [() => ({ matches: false }), DESKTOP],
+    [(q) => ({ matches: q === "(pointer: coarse)" }), TOUCH],
+  ];
+  for (const [matchMedia, hint] of cases) {
+    const { document, page } = await setup({ fetch: fakeFetch(), matchMedia });
+    choose(document, "openai");
+    document.getElementById("apiKey").value = "sk-test";
+    await submit(document, page);
+    assert.ok(status(document).startsWith("✓ Connected to OpenAI"), status(document));
+    assert.ok(status(document).endsWith(` ${hint}`), status(document));
+  }
 });

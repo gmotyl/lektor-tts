@@ -78,6 +78,43 @@ The player bar fits in one row at a 390px viewport: prev, play/pause, next, spee
 - **WHEN** the user taps ⋯
 - **THEN** a fold-out under the row shows the Voice select, the Speed slider with its value and the Autoscroll toggle, and ⋯ becomes a collapse control
 
+### Requirement: Start-point discovery
+Alt+click (desktop) and the selection actions (touch) are discoverable: a one-time tip in the player bar, a device-specific hint on the setup screen, and a tooltip on "From here" on desktop.
+
+#### Scenario: One-time tip on desktop
+- **WHEN** the first session on a device without a coarse pointer starts and `chrome.storage.local` has no `tipShown`
+- **THEN** a thin line above the transport row reads "Tip: Alt+click a paragraph to read from there." with a × button, and `tipShown: true` is written to `chrome.storage.local`
+
+#### Scenario: One-time tip on touch
+- **WHEN** the first session starts on a device where `matchMedia('(pointer: coarse)')` matches
+- **THEN** the tip reads "Tip: select text to read from there."
+
+#### Scenario: Tip hides
+- **WHEN** the tip has been shown for 8 seconds, or the user taps its ×, or the user uses any other bar control
+- **THEN** the tip is removed, and the session keeps running
+
+#### Scenario: Tip only once
+- **WHEN** a session starts and `tipShown` is already `true` in `chrome.storage.local`
+- **THEN** no tip is shown
+
+#### Scenario: Tip grows the bar
+- **WHEN** the tip appears while a sentence is highlighted and autoscroll is on
+- **THEN** the current sentence is re-checked once and scrolls only if it is now under the bar
+
+#### Scenario: Selection strip wins
+- **WHEN** the selection strip appears while the tip is shown
+- **THEN** the tip is removed and only the strip sits above the row
+
+#### Scenario: Setup hint by device
+- **WHEN** "Save and test" succeeds on a desktop
+- **THEN** the status ends with "Try it: open an article and click the Lektor icon, or select text and press Alt+Shift+R. Alt+click a paragraph to read from there."
+- **WHEN** it succeeds on a coarse-pointer device
+- **THEN** the status ends with "Try it: open an article and tap the Lektor icon in the toolbar. Select text to read from there."
+
+#### Scenario: From here tooltip
+- **WHEN** the selection strip is shown on a desktop
+- **THEN** the "From here" button has the title "Read from here — or Alt+click any paragraph"; on a coarse-pointer device it has no title
+
 ## MODIFIED Requirements
 
 ### Requirement: Highlight the current sentence

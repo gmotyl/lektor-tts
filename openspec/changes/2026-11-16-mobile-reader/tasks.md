@@ -244,3 +244,25 @@ Steps:
 
 - [ ] **Step 1:** Open the PR and merge after review
 - [ ] **Step 2:** Greg uploads to both stores and submits the Edge Android form; tag `v1.1.0`
+
+### Task 13: Start-point discovery (added after device testing)
+
+**Files:**
+- Modify: `src/content/bar.mjs` (`showTip`, `touch` option, "From here" title), `src/content/main.mjs` (tip once per device via `chrome.storage.local` `tipShown`, 8 s timer, hide on bar action, re-check), `src/options.mjs` (`START_HINT` per device, injectable `matchMedia`), `README.md`
+- Test: `src/content/__tests__/main.test.mjs`, `src/__tests__/options.test.mjs`
+
+**Acceptance criteria:**
+- WHEN the first session on a desktop starts THEN the bar shows "Tip: Alt+click a paragraph to read from there." on a thin line above the row with a ×, and `tipShown: true` is written to `chrome.storage.local`
+- WHEN the device has a coarse pointer (`matchMedia('(pointer: coarse)')`) THEN the tip reads "Tip: select text to read from there."
+- WHEN 8 s pass, the × is tapped or any bar action fires THEN the tip is removed
+- WHEN `tipShown` is already set THEN no tip is shown
+- WHEN the tip appears while a sentence is highlighted THEN the sentence is re-checked (`recheckSentence`), as for the fold-out
+- WHEN the selection strip appears THEN the tip is removed (the strip wins)
+- WHEN "Save and test" succeeds THEN the hint is "Try it: open an article and click the Lektor icon, or select text and press Alt+Shift+R. Alt+click a paragraph to read from there." on desktop and "Try it: open an article and tap the Lektor icon in the toolbar. Select text to read from there." on touch
+- WHEN the selection strip shows on desktop THEN "From here" has the title "Read from here — or Alt+click any paragraph"; on touch it has none
+
+**Tests:** "first session shows the Alt+click tip once on desktop", "touch devices get the selection tip", "tip hides after 8 seconds, on ×, or on the first bar action", "tip is not shown again after it was shown", "showing the tip re-checks the current sentence", "setup hint matches the device", "From here has an Alt+click tooltip on desktop only"
+
+- [x] **Step 1:** Write the tests and watch them fail — Run: `env -u NODE_ENV pnpm test` — Expected: the new tests FAIL
+- [x] **Step 2:** Implement tip, tooltip and setup hint — Run: `env -u NODE_ENV pnpm test && pnpm lint` — Expected: PASS
+- [x] **Step 3:** Commit — `git commit -m "feat: hint at Alt+click and selection start points"`

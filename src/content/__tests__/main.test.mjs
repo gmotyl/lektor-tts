@@ -55,7 +55,8 @@ function fakePort(name, posted, sender) {
   return port;
 }
 
-function fakeChrome(stored = {}) {
+// local: chrome.storage.local contents (the per-device tip flag), or null for no storage.local.
+function fakeChrome(stored = {}, local = null) {
   const sent = [];
   const posted = [];
   const listeners = [];
@@ -96,13 +97,21 @@ function fakeChrome(stored = {}) {
           Object.assign(stored, obj);
         },
       },
+      ...(local && {
+        local: {
+          get: async (defaults) => ({ ...defaults, ...local }),
+          set: async (obj) => {
+            Object.assign(local, obj);
+          },
+        },
+      }),
     },
   };
 }
 
 // autoConnect: every player frame the controller creates opens its Port on the next microtask,
 // as the real frame does once loaded. Off, the test connects with chrome.connect().
-function setup({ selection = null, stored = {}, listVoices = null, page = PAGE, autoConnect = true } = {}) {
+function setup({ selection = null, stored = {}, local = null, listVoices = null, page = PAGE, autoConnect = true } = {}) {
   // Fake timers for the controller: run() fires every timer due by `ms` after it was set.
   const timers = [];
   const clock = {
@@ -158,7 +167,7 @@ function setup({ selection = null, stored = {}, listVoices = null, page = PAGE, 
     if (type === 'click') clickListeners.delete(fn);
     return remove(type, fn, opts);
   };
-  const chrome = fakeChrome(stored);
+  const chrome = fakeChrome(stored, local);
   const win = {
     document,
     chrome,
@@ -1345,4 +1354,120 @@ test('a tap reads the selection shown even after its live range collapsed', asyn
   assert.equal(plays.length, 2);
   assert.equal(plays[1].sentences.length, 2);
   assert.match(plays[1].sentences[0][0], /^Paragraph 3 talks/);
+});
+
+// Start-point discovery: the one-time tip in the bar.
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+const tip = (t) => t.shadowRoots.at(-1)?.querySelector('.tip') ?? null;
+const tipText = (t) => tip(t)?.querySelector('.tip-text')?.textContent ?? null;
+const DESKTOP_TIP = 'Tip: Alt+click a paragraph to read from there.';
+const TOUCH_TIP = 'Tip: select text to read from there.';
+const asTouch = (t) => {
+  t.win.matchMedia = (q) => ({ matches: q === '(pointer: coarse)' });
+};
+
+async function startedWithTip({ local = {}, touch = false, selection } = {}) {
+  const t = setup({ local, selection });
+  if (touch) asTouch(t);
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  await flush();
+  return { ...t, c, local };
+}
+
+test('first session shows the Alt+click tip once on desktop', async () => {
+  const t = await startedWithTip();
+  assert.equal(tipText(t), DESKTOP_TIP);
+  assert.equal(t.local.tipShown, true, 'flag written when shown');
+  // A thin line above the row, with its own close button.
+  const row = t.shadowRoots.at(-1).querySelector('.row');
+  assert.ok(tip(t).nextElementSibling === row);
+  assert.ok(tip(t).querySelector('button[aria-label="Close tip"]'));
+  // The next session on this device has no tip.
+  await t.c.handle({ type: 'stop' });
+  await t.c.handle({ type: 'start', source: 'auto' });
+  await flush();
+  assert.equal(tip(t), null);
+});
+
+test('touch devices get the selection tip', async () => {
+  const t = await startedWithTip({ touch: true });
+  assert.equal(tipText(t), TOUCH_TIP);
+});
+
+test('tip hides after 8 seconds, on ×, or on the first bar action', async () => {
+  // After 8 seconds.
+  const a = await startedWithTip();
+  a.clock.run(7999);
+  assert.ok(tip(a), 'still shown before 8 s');
+  a.clock.run(8000);
+  assert.equal(tip(a), null);
+
+  // On ×: the tip goes, the session stays.
+  const b = await startedWithTip();
+  tap(b.document, tip(b).querySelector('button[aria-label="Close tip"]'));
+  assert.equal(tip(b), null);
+  assert.ok(b.c.session, 'session still running');
+
+  // On the first bar action.
+  const c = await startedWithTip();
+  tap(c.document, c.shadowRoots.at(-1).querySelector('button.toggle'));
+  assert.equal(tip(c), null);
+
+  // The selection strip wins over the tip.
+  const sel = liveSelection();
+  const d = await startedWithTip({ selection: () => sel });
+  assert.ok(tip(d));
+  const word = d.document.getElementById('p4').firstChild;
+  sel.select(word, 0, word, 9);
+  selectionChange(d.document);
+  d.clock.run(150);
+  assert.ok(strip(d));
+  assert.equal(tip(d), null);
+});
+
+test('tip is not shown again after it was shown', async () => {
+  const t = await startedWithTip({ local: { tipShown: true } });
+  assert.equal(tip(t), null);
+  // No storage.local at all: no tip either.
+  const u = await started();
+  await flush();
+  assert.equal(tip(u), null);
+});
+
+test('showing the tip re-checks the current sentence', async () => {
+  const t = setup({ local: {} });
+  let release;
+  const read = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.chrome.storage.local.get = () => read;
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  fromFrame(c, { type: 'sentence-start', index: 1 });
+  const before = t.highlights.length;
+  release({ tipShown: false });
+  await flush();
+  assert.ok(tip(t), 'tip shown');
+  // The bar grew: the sentence is shown again, scrolling only if it is now under the bar.
+  assert.equal(t.highlights.length, before + 1);
+  assert.ok(t.highlighter.shown === c.session.sentences[1]);
+  assert.equal(t.highlighter.opts.scroll, true);
+});
+
+test('From here has an Alt+click tooltip on desktop only', async () => {
+  for (const touch of [false, true]) {
+    const sel = liveSelection();
+    const t = setup({ selection: () => sel });
+    if (touch) asTouch(t);
+    const c = install(t.win, t.deps);
+    await c.handle({ type: 'start', source: 'auto' });
+    const word = t.document.getElementById('p4').firstChild;
+    sel.select(word, 0, word, 9);
+    selectionChange(t.document);
+    t.clock.run(150);
+    const title = stripButton(t, 'Read from here').getAttribute('title');
+    if (touch) assert.equal(title, null);
+    else assert.equal(title, 'Read from here — or Alt+click any paragraph');
+  }
 });

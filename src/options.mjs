@@ -7,7 +7,12 @@ import { DEFAULTS, isConfigured, loadSettings, saveSettings } from "./settings.m
 import { PRESETS, voicesFor } from "./presets.mjs";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
-const START_HINT = "Try it: select text on any page and press Alt+Shift+R.";
+// Shown after a successful test; a touch screen has no keyboard shortcut and no Alt+click.
+const START_HINT = {
+  desktop:
+    "Try it: open an article and click the Lektor icon, or select text and press Alt+Shift+R. Alt+click a paragraph to read from there.",
+  touch: "Try it: open an article and tap the Lektor icon in the toolbar. Select text to read from there.",
+};
 const VOICE_PLACEHOLDER = "listed after Save and test, or type one";
 
 // Origin that needs a runtime host permission, or null when the manifest already covers it.
@@ -35,6 +40,7 @@ export function initOptions({
   fetch: fetchImpl,
   listVoices = (settings) => engineListVoices(settings, fetchImpl),
   checkModels = (settings) => engineCheckModels(settings, fetchImpl),
+  matchMedia = (query) => globalThis.matchMedia?.(query),
 } = {}) {
   const $ = (id) => doc.getElementById(id);
   const form = $("options");
@@ -46,6 +52,16 @@ export function initOptions({
   let preset = "";
   const drafts = presetDrafts();
   const listed = {};
+
+  function startHint() {
+    let touch = false;
+    try {
+      touch = !!matchMedia?.("(pointer: coarse)")?.matches;
+    } catch {
+      // no media queries: desktop wording
+    }
+    return touch ? START_HINT.touch : START_HINT.desktop;
+  }
 
   function setText(el, text, kind = "") {
     el.textContent = text;
@@ -192,7 +208,7 @@ export function initOptions({
       const found = voices?.length
         ? `✓ Connected to ${label} · ${voices.length} voices.`
         : `✓ Connected to ${label}. The server lists no voices: type one.`;
-      setText(status, `${found} ${START_HINT}`, "ok");
+      setText(status, `${found} ${startHint()}`, "ok");
       return;
     }
     const error = result?.error ?? "unknown error";

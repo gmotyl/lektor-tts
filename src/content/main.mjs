@@ -27,6 +27,11 @@ const FRAME_DID_NOT_START = 'Audio player did not start';
 // Selection actions follow the page selection this long after it stops changing.
 const SELECTION_DEBOUNCE_MS = 150;
 const BAR_SELECTOR = '[data-omnivoice-reader]';
+// One-time start-point tip: shown in the first session on a device (flag in storage.local).
+const TIP_FLAG = 'tipShown';
+const TIP_MS = 8000;
+const TIP_DESKTOP = 'Tip: Alt+click a paragraph to read from there.';
+const TIP_TOUCH = 'Tip: select text to read from there.';
 
 function pageLang(doc, win) {
   return doc.documentElement.getAttribute('lang') || win.navigator?.language || undefined;
@@ -34,6 +39,15 @@ function pageLang(doc, win) {
 
 // Tags whose `src` the context menu reports as OnClickData.srcUrl.
 const SRC_SELECTOR = 'img, video, audio, source, iframe, embed';
+
+// A touch screen (no Alt+click): the primary pointer is coarse.
+function isTouch(win) {
+  try {
+    return !!win.matchMedia?.('(pointer: coarse)')?.matches;
+  } catch {
+    return false;
+  }
+}
 
 // deps: {doc, win, chrome, createBar, createHighlighter, listVoices, setTimeout, clearTimeout}
 // listVoices: async () => {ok, voices: string[] | null}, asked once per session to pick the
@@ -325,6 +339,7 @@ export function createController({
     doc.removeEventListener('click', s.onClick, true);
     doc.removeEventListener('selectionchange', s.onSelectionChange);
     clearTimer(s.selectionTimer);
+    clearTimer(s.tipTimer);
     s.highlighter.clear();
     s.bar.destroy();
   }
@@ -355,9 +370,43 @@ export function createController({
     return play(session.current);
   }
 
+  function hideTip(s) {
+    clearTimer(s.tipTimer);
+    s.tipTimer = null;
+    s.bar.showTip?.(null);
+  }
+
+  // First session on this device: show the start-point tip once. Runs beside the start (a slow
+  // storage read never delays playback); without storage.local there is no tip.
+  async function maybeShowTip(s) {
+    const local = chrome.storage?.local;
+    if (!local?.get) return;
+    let got;
+    try {
+      got = await local.get({ [TIP_FLAG]: false });
+    } catch {
+      return;
+    }
+    if (got?.[TIP_FLAG] || session !== s) return;
+    if (!s.bar.showTip?.(s.touch ? TIP_TOUCH : TIP_DESKTOP)) return;
+    try {
+      await local.set({ [TIP_FLAG]: true });
+    } catch {
+      // storage unavailable: the tip may show once more
+    }
+    s.tipTimer = setTimer(() => {
+      s.tipTimer = null;
+      if (session === s) s.bar.showTip?.(null);
+    }, TIP_MS);
+    // The bar grew: the sentence may now be under it.
+    recheckSentence(s);
+  }
+
   function onAction(type, payload) {
     if (!session) return undefined;
     const { sentences, current } = session;
+    // The first bar action (or its ×) ends the tip.
+    hideTip(session);
     switch (type) {
       case 'toggle':
         return toggle();
@@ -406,6 +455,8 @@ export function createController({
       case 'read-from-here':
       case 'read-selection':
         return readSelection(type);
+      case 'tip-close':
+        return undefined; // hidden above
       case 'close':
         return stop();
       default:
@@ -496,8 +547,12 @@ export function createController({
       selectionTimer: null,
       // Page selection ({sel, range}) the strip is shown for, or null.
       shownSelection: null,
+      // Coarse pointer: selection tip instead of Alt+click hints.
+      touch: isTouch(win),
+      // Hides the start-point tip after TIP_MS.
+      tipTimer: null,
     };
-    s.bar = makeBar({ doc, onAction });
+    s.bar = makeBar({ doc, onAction, touch: s.touch });
     // Capture phase, so the page's own click handlers (links) do not run first.
     s.onClick = (e) => {
       if (!e.altKey || session !== s) return;
@@ -585,7 +640,10 @@ export function createController({
     // A new start while a session runs reuses its bar and listener.
     const running = Boolean(session);
     if (running) session.highlighter.clear();
-    else session = createSession(voice, settings.speed);
+    else {
+      session = createSession(voice, settings.speed);
+      maybeShowTip(session);
+    }
     session.startMsg = msg;
     session.sentences = sentences;
     session.container = container;
