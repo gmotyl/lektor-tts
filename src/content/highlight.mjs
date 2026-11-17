@@ -108,7 +108,10 @@ export function createHighlighter({
   // With the bar on screen the window level centres the sentence in the rows above the bar, and
   // a box reaching under the bar counts only down to the visible area. scrollIntoView cannot keep
   // clear of the bar, so then the per-level path is used for a short block too.
-  function scrollToSentence(range, rect, boxes, area) {
+  // The per-level path scrolls vertically only: a sentence clipped sideways (by the viewport or
+  // an overflow-x scroller) is then brought in with scrollIntoView, 'nearest' on both axes so a
+  // block already visible vertically is not moved up or down.
+  function scrollToSentence(range, rect, boxes, area, visible) {
     const target = scrollTarget(range);
     const block = target?.getBoundingClientRect?.();
     // top..bottom: the rows the sentence must lie in to stay put; centre: the row it is centred on.
@@ -138,6 +141,9 @@ export function createHighlighter({
         top -= delta;
         bottom -= delta;
       }
+      if (rect.right <= visible.left || rect.left >= visible.right) {
+        target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      }
       return;
     }
     target?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
@@ -153,7 +159,8 @@ export function createHighlighter({
     const rect = sentence.range.getBoundingClientRect();
     const boxes = scrollers(scrollTarget(sentence.range));
     const area = windowArea();
-    if (isOffScreen(rect, visibleRect(boxes, area))) scrollToSentence(sentence.range, rect, boxes, area);
+    const visible = visibleRect(boxes, area);
+    if (isOffScreen(rect, visible)) scrollToSentence(sentence.range, rect, boxes, area, visible);
   }
 
   function clear() {

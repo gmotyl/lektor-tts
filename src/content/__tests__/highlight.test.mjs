@@ -254,3 +254,15 @@ test('a scroll box reaching under the bar is clipped to the area above it', () =
   // Already above the bar after the box scrolls: the window stays put.
   assert.equal(winScrolls.length, 0);
 });
+
+test('a horizontally clipped sentence is scrolled into view sideways', () => {
+  const { scrolls, winScrolls, makeSentence, hl } = withBar(740);
+  // Vertically above the bar, but past the right edge of the 1200px-wide viewport.
+  hl.show(makeSentence('p1', { top: 300, bottom: 320, left: 1300, right: 1500 }));
+  // No vertical move; the block is brought in sideways only.
+  assert.equal(winScrolls.length, 0);
+  assert.deepEqual(scrolls, [{ id: 'p1', opts: { block: 'nearest', inline: 'nearest', behavior: 'smooth' } }]);
+  // Horizontally inside: nothing more.
+  hl.show(makeSentence('p1', { top: 300, bottom: 320, left: 100, right: 300 }));
+  assert.equal(scrolls.length, 1);
+});
