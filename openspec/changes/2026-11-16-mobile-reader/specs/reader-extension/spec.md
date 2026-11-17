@@ -102,8 +102,12 @@ Was: toolbar icon, `Alt+Shift+R` or the context menu. Is: those, plus the select
 - **THEN** `permissions` does not contain `offscreen`, `web_accessible_resources` lists `src/player.html`, `host_permissions` contains only localhost and 127.0.0.1 origins, and no script is loaded from a remote URL
 
 ### Requirement: Session lifecycle
-Was: the service worker stopped the offscreen document when the owner tab closed. Is: the player frame ends with its tab; the service worker only stops the previous owner tab when another tab starts.
+Was: the service worker stopped the offscreen document when the owner tab closed. Is: the player frame ends with its tab; the service worker only stops the previous owner tab when another tab starts; a same-document URL change in the owner tab keeps the session and the ownership.
 
 #### Scenario: Tab close
 - **WHEN** the tab of a playing session closes
 - **THEN** audio stops at once and no extension document keeps playing
+
+#### Scenario: Same-document URL change
+- **WHEN** the page changes its URL with history.replaceState/pushState or the hash during a session
+- **THEN** reading continues and the tab stays the owner

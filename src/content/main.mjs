@@ -606,15 +606,19 @@ export function createController({
       case 'toggle':
         return toggle();
       case 'stop':
-        // Stopped from outside (another tab started, the tab navigates): no echo.
+        // Stopped from outside (another tab started): no echo.
         return teardown();
+      case 'ping':
+        // The worker asks after a `loading` update whether the session survived it.
+        return { alive: Boolean(session) };
       default:
         return undefined;
     }
   }
 
-  chrome.runtime.onMessage.addListener((msg) => {
-    handle(msg);
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    const result = handle(msg);
+    if (msg?.type === 'ping') sendResponse?.(result);
     return false;
   });
   chrome.runtime.onConnect?.addListener(onConnect);

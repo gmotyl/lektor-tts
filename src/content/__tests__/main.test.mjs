@@ -449,6 +449,21 @@ test('stop tears down bar, highlight and listeners', async () => {
   }
 });
 
+test('answers ping with whether a session is live', async () => {
+  const t = await started();
+  // The service worker asks over runtime messaging; the answer goes back through sendResponse.
+  const ask = () => {
+    let answer;
+    t.chrome.listeners.forEach((fn) => fn({ type: 'ping' }, {}, (r) => (answer = r)));
+    return answer;
+  };
+  assert.deepEqual(t.c.handle({ type: 'ping' }), { alive: true });
+  assert.deepEqual(ask(), { alive: true });
+  t.c.handle({ type: 'stop' });
+  assert.deepEqual(t.c.handle({ type: 'ping' }), { alive: false });
+  assert.deepEqual(ask(), { alive: false });
+});
+
 test('double injection keeps one session', async () => {
   const t = setup();
   const first = install(t.win, t.deps);

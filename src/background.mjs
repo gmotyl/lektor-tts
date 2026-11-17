@@ -130,16 +130,30 @@ export function createBackground(chrome, deps = {}) {
     void startIn(tab?.id, start);
   });
 
-  // The owner tab closing or navigating takes its session (and player frame) with it.
+  // The owner tab closing takes its session (and player frame) with it.
   chrome.tabs.onRemoved.addListener((tabId) => clearOwnerIf(tabId));
 
-  // A reload or cross-document navigation destroys the content script, but pushState and hash
-  // changes (Slack, Gmail) keep the page and its session alive: the owner tab is told to stop.
-  // On a real navigation nothing receives it, and toTab ignores that failure.
+  // Does the tab's content script still hold a live session? No receiver (a cross-document
+  // navigation destroyed the content script) counts as no.
+  async function hasLiveSession(tabId) {
+    try {
+      const answer = await chrome.tabs.sendMessage(tabId, { type: "ping" });
+      return answer?.alive === true;
+    } catch {
+      return false;
+    }
+  }
+
+  // `loading` fires for real navigations but also for same-document URL changes
+  // (history.replaceState/pushState, hash): the tab is asked whether its session survived.
+  // A real navigation needs no stop: the document, content script and player frame die with it.
   chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
     if (changeInfo?.status !== "loading" || (await getOwner()) !== tabId) return;
-    setOwner(null);
-    await toTab(tabId, { type: "stop" });
+    const generation = startGeneration;
+    if (await hasLiveSession(tabId)) return;
+    // A start during the ping (in this tab) owns a fresh session: leave it alone.
+    if (generation !== startGeneration) return;
+    await clearOwnerIf(tabId);
   });
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

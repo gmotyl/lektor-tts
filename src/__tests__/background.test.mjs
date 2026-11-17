@@ -227,33 +227,97 @@ test("owner tab navigation clears ownership", async () => {
   assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
 });
 
-test("in-page navigation in the owner tab stops its session", async () => {
+// Answers the worker's ping from `tabId` like a content script would; other messages are recorded.
+function answerPing(chrome, tabId, answer) {
+  const send = chrome.tabs.sendMessage;
+  chrome.tabs.sendMessage = async (id, msg) => {
+    if (id === tabId && msg.type === "ping") {
+      chrome.calls.tabMessages.push({ tabId: id, msg });
+      return answer();
+    }
+    return send(id, msg);
+  };
+}
+
+test("same-document history update keeps the session and ownership", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
   chrome.action.onClicked.fire({ id: 4 });
   await tick();
-  // A non-owner tab loading is not told anything.
+  // A non-owner tab loading is not asked anything.
   chrome.tabs.onUpdated.fire(5, { status: "loading" });
   await tick();
-  assert.equal(stopsTo(chrome, 5), 0);
+  assert.equal(chrome.calls.tabMessages.filter((m) => m.tabId === 5).length, 0);
 
-  // pushState / hash change on an SPA: the page (and its session) survive, so it is stopped.
-  // On a real navigation nothing receives the stop; that failure is ignored.
-  chrome.tabs.sendMessage = async (tabId, msg) => {
-    chrome.calls.tabMessages.push({ tabId, msg });
-    throw new Error("Could not establish connection. Receiving end does not exist.");
-  };
+  // history.replaceState with the same URL (gry-online waypoints) and a hash change both fire
+  // `loading` without a new document: the content script still has its session.
+  answerPing(chrome, 4, () => ({ alive: true }));
   chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  chrome.tabs.onUpdated.fire(4, { status: "loading", url: "https://example.com/a#x" });
   await tick();
-  assert.equal(stopsTo(chrome, 4), 1);
+  assert.equal(stopsTo(chrome, 4), 0);
 
-  // Ownership is gone: a start elsewhere stops nobody, the shortcut on tab 4 starts afresh.
+  // Still the owner: the shortcut toggles, a start elsewhere stops this tab.
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "toggle" } });
   chrome.action.onClicked.fire({ id: 6 });
   await tick();
   assert.equal(stopsTo(chrome, 4), 1);
+});
+
+test("real navigation clears ownership", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  // A cross-document navigation destroyed the content script: nothing receives the ping.
+  answerPing(chrome, 4, () => {
+    throw new Error("Could not establish connection. Receiving end does not exist.");
+  });
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 0, "the session died with the document; no stop needed");
+
+  chrome.action.onClicked.fire({ id: 6 });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 0);
   chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
   await tick();
   assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
+});
+
+test("a session that already ended releases ownership on loading", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  answerPing(chrome, 4, () => ({ alive: false }));
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 0);
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
+});
+
+test("a start in the owner tab during the ping is not undone", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  // The ping answers only after a new start in the same tab took ownership again.
+  let release;
+  answerPing(chrome, 4, () => new Promise((r) => (release = () => r(undefined))));
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  await tick();
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  release();
+  await tick();
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "toggle" } });
 });
 
 test("a stale start does not show the setup prompt", async () => {
