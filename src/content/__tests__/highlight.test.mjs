@@ -8,7 +8,7 @@ class FakeHighlight extends Set {
   constructor(...ranges) { super(ranges); }
 }
 
-function setup({ rect = { top: 100, bottom: 120, left: 10, right: 200 } } = {}) {
+function setup({ rect = { top: 100, bottom: 120, left: 10, right: 200 }, obscuredBottom } = {}) {
   const { document, window } = parseHTML(`<!doctype html><html><head></head><body>
     <article id="root"><p id="p1">First sentence. Second sentence.</p><p id="p2">Third one.</p></article>
   </body></html>`);
@@ -26,7 +26,7 @@ function setup({ rect = { top: 100, bottom: 120, left: 10, right: 200 } } = {}) 
     },
   });
   const highlights = new Map();
-  const hl = createHighlighter({ highlights, Highlight: FakeHighlight, doc: document, win });
+  const hl = createHighlighter({ highlights, Highlight: FakeHighlight, doc: document, win, obscuredBottom });
   return { document, window, win, scrolls, makeSentence, highlights, hl };
 }
 
@@ -173,4 +173,63 @@ test('show with scroll off highlights without scrolling', () => {
   // Default (no options) still scrolls.
   hl.show(far);
   assert.equal(scrolls.length, 1);
+});
+
+// A player bar whose top edge sits at viewport row `top` (800 = no bar), read at each check.
+function withBar(top) {
+  const bar = { top };
+  const ctx = setup({ obscuredBottom: () => bar.top });
+  const winScrolls = [];
+  ctx.win.scrollBy = (opts) => winScrolls.push(opts);
+  return { ...ctx, bar, winScrolls };
+}
+
+test('a sentence behind the bar counts as off-screen', () => {
+  // Bar 60px tall: its top at 740, so the visible area ends at 740 - 16 = 724.
+  const { winScrolls, makeSentence, hl } = withBar(740);
+  hl.show(makeSentence('p1', { top: 600, bottom: 620, left: 0, right: 100 }));
+  assert.equal(winScrolls.length, 0);
+  // Inside the window but under the bar.
+  hl.show(makeSentence('p1', { top: 750, bottom: 770, left: 0, right: 100 }));
+  assert.equal(winScrolls.length, 1);
+  // Partly above the bar, but its bottom runs into the margin.
+  hl.show(makeSentence('p1', { top: 710, bottom: 730, left: 0, right: 100 }));
+  assert.equal(winScrolls.length, 2);
+});
+
+test('autoscroll centres the sentence in the area above the bar', () => {
+  const { scrolls, winScrolls, makeSentence, hl } = withBar(740);
+  hl.show(makeSentence('p2', { top: 1000, bottom: 1020, left: 0, right: 100 }));
+  // Sentence centre (1010) moves to the centre of rows 0..740 (370); no scrollIntoView,
+  // which would centre it in the full viewport (400) and leave it nearer the bar.
+  assert.equal(scrolls.length, 0);
+  assert.deepEqual(winScrolls, [{ top: 640, behavior: 'smooth' }]);
+});
+
+test('taller bar (fold-out open) scrolls earlier', () => {
+  const { bar, winScrolls, makeSentence, hl } = withBar(740);
+  const sentence = makeSentence('p1', { top: 554, bottom: 574, left: 0, right: 100 });
+  hl.show(sentence);
+  assert.equal(winScrolls.length, 0);
+  // The fold-out opens: the bar is now 235px tall (top at 565), read again at the next check.
+  bar.top = 565;
+  hl.show(sentence);
+  // Sentence centre (564) moves to the centre of rows 0..565 (282.5).
+  assert.deepEqual(winScrolls, [{ top: 282, behavior: 'smooth' }]);
+});
+
+test('no bar uses the full viewport', () => {
+  for (const obscuredBottom of [undefined, () => 800, () => null]) {
+    const { win, scrolls, makeSentence, hl } = setup({ obscuredBottom });
+    const winScrolls = [];
+    win.scrollBy = (opts) => winScrolls.push(opts);
+    // Near the bottom edge but fully inside the viewport: no scroll, no margin.
+    hl.show(makeSentence('p1', { top: 770, bottom: 790, left: 0, right: 100 }));
+    assert.equal(scrolls.length, 0);
+    assert.equal(winScrolls.length, 0);
+    // Below the viewport: the block is centred with scrollIntoView, as before.
+    hl.show(makeSentence('p2', { top: 1500, bottom: 1520, left: 0, right: 100 }));
+    assert.deepEqual(scrolls, [{ id: 'p2', opts: { block: 'center', behavior: 'smooth' } }]);
+    assert.equal(winScrolls.length, 0);
+  }
 });

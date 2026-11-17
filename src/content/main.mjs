@@ -471,7 +471,8 @@ export function createController({
       shown: null,
       // Root the sentences were read from (article, pane), or null for a selection.
       container: null,
-      highlighter: makeHighlighter({ doc, win }),
+      // The bar floats over the page bottom: autoscroll keeps the sentence above it.
+      highlighter: makeHighlighter({ doc, win, obscuredBottom: () => s.bar?.topEdge?.() ?? null }),
       bar: null,
       onClick: null,
       // Player frame (iframe in the bar's shadow root), its Port once connected, the commands

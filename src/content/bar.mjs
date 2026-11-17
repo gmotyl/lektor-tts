@@ -273,5 +273,13 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     host.remove();
   }
 
-  return { setState, setVoices, setSpeed, setAutoscroll, showSelectionActions, mount, attach, destroy };
+  // Viewport row of the card's top edge, read live (the strip and the fold-out change its
+  // height), or null when the bar is not on the page. The shadow root stays closed.
+  function topEdge() {
+    if (!host.isConnected) return null;
+    const r = barEl.getBoundingClientRect();
+    return r && r.height > 0 ? r.top : null;
+  }
+
+  return { setState, setVoices, setSpeed, setAutoscroll, showSelectionActions, mount, attach, destroy, topEdge };
 }

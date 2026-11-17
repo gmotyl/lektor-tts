@@ -94,6 +94,20 @@ test('destroy removes the bar', () => {
   assert.equal(document.body.children.length, 1);
 });
 
+test("reports the bar's top edge", () => {
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  // The card's rect, read live from inside the closed shadow root.
+  let top = 740;
+  root.querySelector('.bar').getBoundingClientRect = () => ({ top, bottom: top + 60, height: 60, left: 10, right: 380 });
+  assert.equal(bar.topEdge(), 740);
+  top = 565;
+  assert.equal(bar.topEdge(), 565);
+  // Once removed from the page there is no bar to avoid.
+  bar.destroy();
+  assert.equal(bar.topEdge(), null);
+});
+
 test('bar host is a custom element reset against page CSS', () => {
   const { attached } = setup();
   const { host, root } = attached[0];

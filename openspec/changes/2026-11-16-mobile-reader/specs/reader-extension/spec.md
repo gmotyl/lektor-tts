@@ -80,6 +80,13 @@ The player bar fits in one row at a 390px viewport: prev, play/pause, next, spee
 
 ## MODIFIED Requirements
 
+### Requirement: Highlight the current sentence
+Was: the sentence being spoken is highlighted on the original page without changing the page's DOM, and scrolled into view when off-screen, centred in the full viewport. Is: the visible area ends 16px above the player bar's top edge (read at every check, as the selection strip and the ⋯ fold-out make the bar taller); a sentence reaching below that counts as off-screen, and autoscroll centres it in the area above the bar. Without a bar the full viewport is used, as before.
+
+#### Scenario: Sentence under the player bar
+- **WHEN** autoscroll is on and the sentence being read would be under the player bar
+- **THEN** the page scrolls so the sentence sits in the middle of the area above the bar
+
 ### Requirement: Speak through an OpenAI-compatible engine
 Was: the "Resume after a long pause" scenario recreated Chrome's idle audio document. Is: the player frame lives as long as the tab, so resume needs no recreation.
 
