@@ -63,20 +63,24 @@ export function createBackground(chrome, deps = {}) {
     }
   };
 
-  // Bumped by every start: a slower earlier start (injection, settings load) must not take
-  // ownership or send `start` after a newer one; the newest start wins.
+  // Bumped by every start that injected: a slower earlier start (settings load, stopping the
+  // previous owner) must not take ownership or send `start` after a newer one; the newest
+  // successful start wins. A start that cannot inject never bumps it, so it cannot cancel a
+  // pending one.
   let startGeneration = 0;
+  // The generation that last claimed ownership.
+  let ownerGeneration = 0;
 
   async function startIn(tabId, start) {
     if (tabId === undefined || tabId === null) return;
-    const generation = ++startGeneration;
-    const stale = () => generation !== startGeneration;
     try {
       await chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_FILE] });
     } catch {
       // Restricted pages (chrome://, the web store) cannot be scripted; nothing to read there.
       return;
     }
+    const generation = ++startGeneration;
+    const stale = () => generation !== startGeneration;
     // No engine set up yet: the bar shows the setup prompt instead of starting a session.
     let settings = null;
     try {
@@ -90,9 +94,15 @@ export function createBackground(chrome, deps = {}) {
     const previous = await getOwner();
     if (stale()) return;
     setOwner(tabId);
+    ownerGeneration = generation;
     if (previous !== null && previous !== tabId) await toTab(previous, { type: "stop" });
-    // A newer start may have taken over while the previous owner was stopping.
-    if (stale()) return;
+    // A newer start may have taken over while the previous owner was stopping. If it has not
+    // claimed ownership yet (e.g. it bailed with the setup prompt), this tab never gets `start`
+    // and must not stay the owner.
+    if (stale()) {
+      if (ownerGeneration === generation) setOwner(null);
+      return;
+    }
     await toTab(tabId, { type: "start", ...start });
   }
 

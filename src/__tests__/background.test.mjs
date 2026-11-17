@@ -411,6 +411,41 @@ test("a start superseded while stopping the previous owner is not delivered", as
   assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 3, msg: { type: "start", source: "auto" } });
 });
 
+test("a newer start on an un-scriptable page does not cancel a pending start", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 1 });
+  await tick();
+  chrome.calls.tabMessages.length = 0;
+
+  // Tab 1's stop is slow: meanwhile a start in tab 3 (a chrome:// page) fails to inject.
+  const send = chrome.tabs.sendMessage;
+  let release;
+  chrome.tabs.sendMessage = (tabId, msg) => {
+    if (tabId === 1 && msg.type === "stop" && !release) {
+      chrome.calls.tabMessages.push({ tabId, msg });
+      return new Promise((r) => (release = r));
+    }
+    return send(tabId, msg);
+  };
+  const inject = chrome.scripting.executeScript;
+  chrome.scripting.executeScript = async (opts) => {
+    if (opts.target.tabId === 3) throw new Error("Cannot access a chrome:// URL");
+    return inject(opts);
+  };
+  chrome.action.onClicked.fire({ id: 2 });
+  await tick();
+  chrome.action.onClicked.fire({ id: 3 });
+  await tick();
+  release();
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 2, msg: { type: "start", source: "auto" } });
+  // Ownership sits on the tab that received `start`: the shortcut there toggles.
+  chrome.commands.onCommand.fire("toggle-reading", { id: 2 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 2, msg: { type: "toggle" } });
+});
+
 test("a tab that cannot be scripted does not take ownership", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
