@@ -1,4 +1,4 @@
-// Offscreen audio player: walks the sentence queue, plays each sentence's pieces in order
+// Player frame audio player: walks the sentence queue, plays each sentence's pieces in order
 // through one audio element, and reports progress via `sentence-start` / `state` messages.
 //
 // Every navigation (play, seek, setVoice, stop) bumps `generation`; async work from an
@@ -74,7 +74,13 @@ export function createPlayer({
     const g = generation;
     Promise.resolve(audio.play()).catch((err) => {
       // play() interrupted by pause/new src rejects with AbortError — not a failure.
-      if (g === generation && !isAbort(err)) fail(err);
+      if (g !== generation || isAbort(err)) return;
+      // Autoplay refused (no user gesture): wait paused, so a tap on resume plays it.
+      if (err?.name === "NotAllowedError") {
+        paused = true;
+        return setState("paused");
+      }
+      fail(err);
     });
   }
 

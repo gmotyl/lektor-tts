@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -33,9 +33,12 @@ test("manifest host_permissions are localhost-only", () => {
 });
 
 test("manifest has no all-sites permission", () => {
-  const raw = readFileSync(manifestPath, "utf8");
-  assert.ok(!raw.includes("<all_urls>"), "<all_urls> must not appear");
   const m = readManifest();
+  // <all_urls> may appear only as web_accessible_resources matches (pages that may embed the
+  // player frame), which grants no access to those pages.
+  for (const p of [...(m.permissions ?? []), ...(m.host_permissions ?? []), ...(m.optional_host_permissions ?? [])]) {
+    assert.notEqual(p, "<all_urls>", "<all_urls> must not be a permission");
+  }
   for (const p of [...(m.permissions ?? []), ...(m.host_permissions ?? [])]) {
     assert.ok(!/^\*:\/\/|^https?:\/\/\*\//.test(p), `all-sites pattern in required permissions: ${p}`);
   }
@@ -65,7 +68,7 @@ test("every manifest path exists after build", () => {
     ...Object.values(m.action?.default_icon ?? {}),
     // Not named in the manifest but loaded at runtime by the service worker.
     "dist/content.js",
-    "src/offscreen.html",
+    ...(m.web_accessible_resources ?? []).flatMap((r) => r.resources),
   ];
   for (const p of paths) {
     assert.equal(typeof p, "string", "manifest path missing");
@@ -73,14 +76,48 @@ test("every manifest path exists after build", () => {
   }
 });
 
-test("manifest requires Chrome 116 for runtime.getContexts", () => {
+test("manifest has no offscreen permission", () => {
+  const m = readManifest();
+  assert.ok(!(m.permissions ?? []).includes("offscreen"), "offscreen permission");
+  assert.ok(!existsSync(join(root, "src", "offscreen.html")), "src/offscreen.html still exists");
+});
+
+// Root-relative paths of `entry` and every local module it imports, transitively.
+function moduleGraph(entry) {
+  const seen = new Set();
+  const visit = (path) => {
+    if (seen.has(path)) return;
+    seen.add(path);
+    const text = readFileSync(join(root, path), "utf8");
+    const specifiers = /\bimport\s*(?:\(\s*|[^'";]*?\bfrom\s*)?["'](\.{1,2}\/[^"']+)["']/g;
+    for (const [, spec] of text.matchAll(specifiers)) {
+      visit(posix.normalize(posix.join(posix.dirname(path), spec)));
+    }
+  };
+  visit(entry);
+  return [...seen];
+}
+
+test("player frame is web accessible", () => {
+  const m = readManifest();
+  const entries = m.web_accessible_resources ?? [];
+  const listed = entries.flatMap((r) => r.resources);
+  for (const r of entries) assert.deepEqual(r.matches, ["<all_urls>"], "the frame is embedded in any page");
+  const graph = moduleGraph("src/player.mjs");
+  assert.ok(graph.includes("src/player/queue.mjs"), "import parsing found the player modules");
+  for (const path of ["src/player.html", ...graph]) {
+    assert.ok(listed.includes(path), `not web accessible: ${path}`);
+  }
+});
+
+test("manifest requires Chrome 116", () => {
   assert.equal(readManifest().minimum_chrome_version, "116");
 });
 
-test("manifest is named Lektor TTS at version 1.0.0", () => {
+test("manifest is named Lektor TTS at version 1.1.0", () => {
   const m = readManifest();
   assert.equal(m.name, "Lektor TTS");
-  assert.equal(m.version, "1.0.0");
+  assert.equal(m.version, "1.1.0");
   assert.equal(m.action?.default_title, "Lektor TTS");
 });
 

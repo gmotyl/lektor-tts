@@ -19,6 +19,11 @@ player bar sits on top of the page.
 - **Navigation** by sentence, and by paragraph with Shift.
 - **Highlight** of the current sentence (CSS Custom Highlight API, no DOM changes).
 - **Voice** and **speed** (0.5–2.0) from the bar or the options page.
+- **Screen off**: audio plays in the player frame inside the tab, so reading continues with the
+  screen locked, and the Media Session gives play / pause and previous / next sentence on the
+  lock screen, the media notification, headsets and media keys.
+- **Touch**: a one-row bar on phones; selecting text while reading shows **From here** and
+  **Selection** buttons on the bar.
 
 Polish and English text are segmented into sentences (abbreviations, decimal commas, quotes);
 long sentences are cut into pieces of at most 400 characters, and the next sentences are
@@ -55,8 +60,7 @@ Then in the browser:
 After every rebuild, press the reload button on the extension's card; tabs that were already
 reading need a page reload too.
 
-Chrome / Edge 116 is the `minimum_chrome_version`: the offscreen document API needs 109+,
-`chrome.runtime.getContexts` 116+, the CSS Custom Highlight API 105+.
+Chrome / Edge 116 is the `minimum_chrome_version`; the CSS Custom Highlight API needs 105+.
 
 ## Setup
 
@@ -134,15 +138,19 @@ The player bar:
 | ----------------- | ------------------------------------------------------------- |
 | Play / Pause      | pause and resume                                              |
 | Previous / Next   | previous / next sentence; with **Shift**: previous / next paragraph |
+| Speed chip        | shows the current speed; a tap moves to the next preset (0.8, 1.0, 1.2, 1.5, 2.0, then back to 0.8). Saved as the default |
+| ⋯                 | folds out Voice, the Speed slider and Autoscroll under the row |
 | Voice             | switch voice; the current sentence starts again in the new voice; remembered as the default |
 | Speed slider      | 0.5×–2.0×, applies immediately                                |
 | Autoscroll        | on / off: follow the read sentence by scrolling; off keeps the highlight but never scrolls. Saved as the default |
 | Close             | stop and remove the bar and highlight                         |
 
 A voice chosen on the bar is saved as the default (the next session and Options use it), and so is
-the **Autoscroll** toggle (shared with the Options checkbox). Speed changed on the bar applies to the
-current session only; its default lives in Options.
+the **Autoscroll** toggle (shared with the Options checkbox), and a speed picked with the chip. The
+speed slider applies to the current session only; its default lives in Options.
 **Alt+click** a paragraph to jump there (also after the last sentence, until you close the bar).
+On a touch screen, select text and use **From here** or **Selection** on the bar instead. The first
+session on a device shows a one-time tip on the bar naming the start point for that device.
 Alt+click outside what is being read (another pane of an app page) starts reading that pane there;
 so does Alt+click on a message while the whole app page is read, which narrows reading to that pane.
 Only one tab reads at a time: starting in another tab stops the first one. Navigating or closing
@@ -166,10 +174,6 @@ To change the shortcut, open `chrome://extensions/shortcuts` (`edge://extensions
   **Read selection**, or press **Retry** once the page has finished rendering.
 - **Nothing happens on click**: browsers block scripting on `chrome://` / `edge://` pages and the
   Chrome Web Store / Edge Add-ons pages; the extension cannot read there.
-- **Resuming after a long pause**: Chrome closes the hidden audio (offscreen) document about 30 s
-  after sound stops. The extension recreates it on resume or seek (and on a voice / speed change
-  while loading or playing; while paused the change is kept for the next resume), so a pause
-  longer than that resumes from the start of the current sentence rather than mid-sentence.
 - **The page jumps while I scroll around**: turn **Autoscroll** off on the bar (dimmed = off). The
   current sentence stays highlighted; turning it back on scrolls to it right away.
 - **Slack / Gmail reads the sidebar or channel list**: start with **Read from here** (or Alt+click
@@ -213,11 +217,11 @@ File map:
 
 | Path                         | Role                                                                 |
 | ---------------------------- | -------------------------------------------------------------------- |
-| `manifest.json`              | MV3 manifest: permissions, command, options page                     |
-| `src/background.mjs`         | service worker: triggers, on-demand injection of `dist/content.js`, single-tab ownership, message routing, setup screen on install |
-| `src/offscreen.html`, `src/offscreen.mjs` | offscreen document: owns the queue and the `<audio>` element |
-| `src/offscreen/queue.mjs`    | prefetching sentence queue (3 ahead), abortable                      |
-| `src/offscreen/player.mjs`   | plays each sentence's pieces in order, emits progress                |
+| `manifest.json`              | MV3 manifest: permissions, command, options page, web-accessible player frame |
+| `src/background.mjs`         | service worker: triggers, on-demand injection of `dist/content.js`, single-tab ownership, setup screen on install |
+| `src/player.html`, `src/player.mjs` | player frame (web-accessible iframe in the bar): owns the queue, the `<audio>` element and the Media Session |
+| `src/player/queue.mjs`       | prefetching sentence queue (3 ahead), abortable                      |
+| `src/player/player.mjs`      | plays each sentence's pieces in order, emits progress                |
 | `src/engine.mjs`             | OpenAI-compatible client: `speak`, `listVoices`                      |
 | `src/presets.mjs`            | engine presets (OpenAI, omnivoice-server, other) and OpenAI voices per model |
 | `src/settings.mjs`           | defaults, load / save, preset migration, speed clamp                 |
@@ -233,25 +237,28 @@ File map:
 | `scripts/screenshots.mjs`, `scripts/fake-engine.mjs` | screenshots against a silent fake `/audio/speech` engine |
 | `store/`                     | listing text (`listing.md`), screenshots, store logo                 |
 
-Messages (`chrome.runtime.sendMessage` / `chrome.tabs.sendMessage`). Content scripts talk to the
-service worker; the worker re-sends engine commands to the offscreen document stamped
-`target: "offscreen"` (offscreen acts only on stamped copies, the worker ignores them):
+Messages. Content scripts and the service worker use `chrome.runtime.sendMessage` /
+`chrome.tabs.sendMessage`; the worker only starts sessions and tracks the owner tab (the tab it
+last started reading in). Audio commands go from the content script to its player frame over a
+Port (`chrome.tabs.connect` from the frame, named `player`), never through the worker:
 
 | type                         | direction                 | payload                                                       |
 | ---------------------------- | ------------------------- | ------------------------------------------------------------- |
-| `play`                       | content → sw → offscreen  | `{sentences: string[][], start, voice, speed}`; the worker adds `tabId` and `settings: {baseUrl, apiKey, model}` |
-| `seek`                       | content → sw → offscreen  | `{index}`                                                     |
-| `pause` / `resume` / `stop`  | content or sw → offscreen | —                                                             |
-| `set-speed`                  | content → sw → offscreen  | `{speed}`                                                     |
-| `set-voice`                  | content → sw → offscreen  | `{voice}`                                                     |
-| `sentence-start`             | offscreen → sw → content  | `{index}`                                                     |
-| `state`                      | offscreen → sw → content  | `{state: "loading"\|"playing"\|"paused"\|"idle"\|"error", error?}` |
+| `play`                       | content → frame (Port)    | `{sentences: string[][], start, voice, speed, title}`; the frame reads the engine settings from storage |
+| `seek`                       | content → frame (Port)    | `{index}`                                                     |
+| `pause` / `resume` / `stop`  | content → frame (Port)    | —                                                             |
+| `set-speed`                  | content → frame (Port)    | `{speed}`                                                     |
+| `set-voice`                  | content → frame (Port)    | `{voice}`                                                     |
+| `sentence-start`             | frame → content (Port)    | `{index}`                                                     |
+| `state`                      | frame → content (Port)    | `{state: "loading"\|"playing"\|"paused"\|"ended"}`            |
+| `error`                      | frame → content (Port)    | `{message}`                                                   |
 | `stop`                       | sw → content              | — (to the previous owner tab when another tab starts; content tears down without echoing) |
 | `toggle`                     | sw → content              | — (shortcut on the reading tab)                               |
 | `start`                      | sw → content              | `{source: "auto"\|"selection"\|"from-here", linkUrl?, srcUrl?}` |
 | `setup-prompt`               | sw → content              | — (no engine set up: show the setup prompt instead of reading) |
 | `list-voices`                | content → sw              | — ; answered via `sendResponse` with `{ok, voices: string[] \| null}` (`null`: reachable, no list) or `{ok: false, error}` |
 | `open-options`               | content → sw              | — (content scripts cannot open the options page)              |
+| `session-end`                | content → sw              | — (the user closed the bar: the tab no longer owns a session) |
 
 Specs live in `openspec/specs/`; open changes in `openspec/changes/`.
 
@@ -261,16 +268,21 @@ Specs live in `openspec/specs/`; open changes in `openspec/changes/`.
    `pnpm package` refuses).
 2. `pnpm lint && pnpm test` (the test run builds `dist/content.js` first).
 3. `pnpm package` → `lektor-tts-<version>.zip`.
-4. `pnpm screenshots` if the UI changed, and commit the new `store/*.png`.
+4. `pnpm screenshots`, and commit the new `store/*.png` if the UI changed.
 5. Upload the same zip to both stores and paste the texts from
    [`store/listing.md`](store/listing.md):
-   - **Edge:** Partner Center (descriptions, permission justifications, notes for certification).
-   - **Chrome:** Chrome Web Store Developer Dashboard (Store listing tab, Privacy practices tab,
-     Test instructions; see the Chrome section of the listing file).
+   - **Edge Add-ons:** Partner Center (descriptions, permission justifications, notes for
+     certification).
+   - **Chrome Web Store:** Developer Dashboard (Store listing tab, Privacy practices tab, the
+     short Test instructions; see the Chrome section of the listing file).
 
    Each store gets its own reviewers' OpenAI key, pasted only into that store's submission notes,
    never into the repo; revoke it once the release is approved.
 6. Tag the release: `git tag v<version> && git push origin v<version>`.
+7. Once, after the release is live on Edge Add-ons: request the Edge Android allowlist with the
+   value statement, test cases and form link in
+   [`store/listing.md` § Edge Android](store/listing.md#edge-android). Run the test cases on Edge
+   for Android first.
 
 Created by Greg Motyl — [github.com/gmotyl](https://github.com/gmotyl)
 

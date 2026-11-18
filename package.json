@@ -1,6 +1,6 @@
 {
   "name": "lektor-tts",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Lektor TTS: a Chrome/Edge MV3 extension that reads pages aloud through an OpenAI-compatible /audio/speech engine",

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseHTML } from 'linkedom';
-import { createController, install } from '../main.mjs';
+import { createController, install as installController } from '../main.mjs';
 import { createBar } from '../bar.mjs';
 import { installTextRange } from './fake-range.mjs';
 import { SLACK, CHANNELS, scrollPanes } from './app-pages.mjs';
@@ -24,23 +24,69 @@ function fakeSelection(startNode, startOffset, endNode, endOffset) {
   let common = endNode;
   while (common && !ancestors.has(common)) common = common.parentNode;
   range.commonAncestorContainer = common;
+  range.cloneRange = () => ({ ...range });
   return { rangeCount: 1, isCollapsed: false, getRangeAt: () => range };
 }
 
-function fakeChrome(stored = {}) {
+// A Port as the content script sees it: what it posts lands in `posted` (shared by every port),
+// emit() delivers a frame event, drop() is the frame going away.
+function fakePort(name, posted, sender) {
+  const onMessage = [];
+  const onDisconnect = [];
+  const port = {
+    name,
+    sender,
+    connected: true,
+    postMessage: (msg) => {
+      if (!port.connected) throw new Error('Attempting to use a disconnected port object');
+      posted.push(msg);
+    },
+    disconnect: () => {
+      port.connected = false;
+    },
+    onMessage: { addListener: (fn) => onMessage.push(fn) },
+    onDisconnect: { addListener: (fn) => onDisconnect.push(fn) },
+    emit: (msg) => onMessage.forEach((fn) => fn(msg, port)),
+    drop: () => {
+      port.connected = false;
+      onDisconnect.forEach((fn) => fn(port));
+    },
+  };
+  return port;
+}
+
+// local: chrome.storage.local contents (the per-device tip flag), or null for no storage.local.
+function fakeChrome(stored = {}, local = null) {
   const sent = [];
+  const posted = [];
   const listeners = [];
+  const connectListeners = [];
+  const ports = [];
   return {
     sent,
+    posted,
+    ports,
     listeners,
+    connectListeners,
+    // The player frame opening its Port to this tab.
+    connect(name = 'player', sender = { url: 'chrome-extension://test/src/player.html', frameId: 0 }) {
+      const port = fakePort(name, posted, sender);
+      ports.push(port);
+      connectListeners.forEach((fn) => fn(port));
+      return port;
+    },
     runtime: {
       id: 'test',
+      getURL: (path) => `chrome-extension://test/${path}`,
       sendMessage: async (msg) => {
         sent.push(msg);
       },
       onMessage: {
         addListener: (fn) => listeners.push(fn),
         removeListener: (fn) => listeners.splice(listeners.indexOf(fn), 1),
+      },
+      onConnect: {
+        addListener: (fn) => connectListeners.push(fn),
       },
     },
     stored,
@@ -51,15 +97,64 @@ function fakeChrome(stored = {}) {
           Object.assign(stored, obj);
         },
       },
+      ...(local && {
+        local: {
+          get: async (defaults) => ({ ...defaults, ...local }),
+          set: async (obj) => {
+            Object.assign(local, obj);
+          },
+        },
+      }),
     },
   };
 }
 
-function setup({ selection = null, stored = {}, listVoices = null, page = PAGE } = {}) {
+// autoConnect: every player frame the controller creates opens its Port on the next microtask,
+// as the real frame does once loaded. Off, the test connects with chrome.connect().
+function setup({ selection = null, stored = {}, local = null, listVoices = null, page = PAGE, autoConnect = true } = {}) {
+  // Fake timers for the controller: run() fires every timer due by `ms` after it was set.
+  const timers = [];
+  const clock = {
+    timers,
+    setTimeout: (fn, ms) => {
+      const t = { fn, ms, done: false };
+      timers.push(t);
+      return t;
+    },
+    clearTimeout: (t) => {
+      if (t) t.done = true;
+    },
+    run(ms) {
+      for (const t of [...timers]) {
+        if (!t.done && t.ms <= ms) {
+          t.done = true;
+          t.fn();
+        }
+      }
+    },
+  };
   const { document, window } = parseHTML(
     `<!doctype html><html lang="en"><head><title>Test</title></head><body>${page}</body></html>`,
   );
   installTextRange(document);
+  const frames = [];
+  // Closed shadow roots of the bars, recorded so tests can look inside them.
+  const shadowRoots = [];
+  const createElement = document.createElement.bind(document);
+  document.createElement = (name, ...rest) => {
+    const el = createElement(name, ...rest);
+    const attach = el.attachShadow;
+    el.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      shadowRoots.push(root);
+      return root;
+    };
+    if (String(name).toLowerCase() === 'iframe') {
+      frames.push(el);
+      if (autoConnect) queueMicrotask(() => chrome.connect('player'));
+    }
+    return el;
+  };
   // Count the controller's capture-phase click listeners, so a missing removeEventListener shows.
   const clickListeners = new Set();
   const add = document.addEventListener.bind(document);
@@ -72,7 +167,7 @@ function setup({ selection = null, stored = {}, listVoices = null, page = PAGE }
     if (type === 'click') clickListeners.delete(fn);
     return remove(type, fn, opts);
   };
-  const chrome = fakeChrome(stored);
+  const chrome = fakeChrome(stored, local);
   const win = {
     document,
     chrome,
@@ -110,9 +205,24 @@ function setup({ selection = null, stored = {}, listVoices = null, page = PAGE }
     bars.push(wrapped);
     return wrapped;
   };
-  const deps = { createBar: makeBar, createHighlighter: () => highlighter, listVoices };
-  return { document, window, win, chrome, highlighter, highlights, bars, deps, clickListeners };
+  const deps = {
+    createBar: makeBar,
+    createHighlighter: () => highlighter,
+    listVoices,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+  };
+  return { document, window, win, chrome, highlighter, highlights, bars, deps, clickListeners, frames, clock, shadowRoots };
 }
+
+// Frame events arrive over the player frame's Port, never as runtime messages.
+const chromeOf = new WeakMap();
+function install(win, deps) {
+  const c = installController(win, deps);
+  chromeOf.set(c, win.chrome);
+  return c;
+}
+const fromFrame = (c, msg) => chromeOf.get(c).ports.at(-1).emit(msg);
 
 const barHosts = (doc) => doc.querySelectorAll('[data-omnivoice-reader="bar"]').length;
 const ofType = (sent, type) => sent.filter((m) => m.type === type);
@@ -133,7 +243,7 @@ async function started(opts, startMsg = { type: 'start', source: 'auto' }) {
 
 test('auto start reads the article from the first sentence', async () => {
   const { chrome, document, c } = await started({ stored: { voice: 'alba', speed: 1.2 } });
-  const [play] = ofType(chrome.sent, 'play');
+  const [play] = ofType(chrome.posted, 'play');
   assert.ok(play, 'play sent');
   assert.equal(play.start, 0);
   assert.equal(play.voice, 'alba');
@@ -152,7 +262,7 @@ test('selection start reads only the selection', async () => {
   };
   for (const source of ['selection', 'auto']) {
     const { chrome } = await started({ selection }, { type: 'start', source });
-    const [play] = ofType(chrome.sent, 'play');
+    const [play] = ofType(chrome.posted, 'play');
     assert.equal(play.start, 0);
     assert.equal(play.sentences.length, 1, source);
     assert.match(play.sentences[0][0], /^Paragraph 2 talks/);
@@ -168,7 +278,7 @@ test('from-here starts at the paragraph under the point', async () => {
   t.document.getElementById('p4').appendChild(a);
   const c = install(t.win, t.deps);
   await c.handle({ type: 'start', source: 'from-here', linkUrl: 'https://example.com/more' });
-  const [play] = ofType(t.chrome.sent, 'play');
+  const [play] = ofType(t.chrome.posted, 'play');
   assert.match(play.sentences[play.start][0], /^Paragraph 4 talks/);
 
   // A plain page right-click has no link: the innermost hovered element decides.
@@ -180,14 +290,14 @@ test('from-here starts at the paragraph under the point', async () => {
       : qsa(sel);
   const c2 = install(t2.win, t2.deps);
   await c2.handle({ type: 'start', source: 'from-here' });
-  const [play2] = ofType(t2.chrome.sent, 'play');
+  const [play2] = ofType(t2.chrome.posted, 'play');
   assert.match(play2.sentences[play2.start][0], /^Paragraph 3 talks/);
 
   // nothing resolvable → falls back to the first sentence
   const t3 = setup();
   const c3 = install(t3.win, t3.deps);
   await c3.handle({ type: 'start', source: 'from-here', srcUrl: 'https://example.com/missing.png' });
-  assert.equal(ofType(t3.chrome.sent, 'play')[0].start, 0);
+  assert.equal(ofType(t3.chrome.posted, 'play')[0].start, 0);
 });
 
 test('from-here resolves a clicked image by srcUrl', async () => {
@@ -197,17 +307,17 @@ test('from-here resolves a clicked image by srcUrl', async () => {
   t.document.getElementById('p5').appendChild(img);
   const c = install(t.win, t.deps);
   await c.handle({ type: 'start', source: 'from-here', srcUrl: 'https://example.com/pic.png' });
-  const [play] = ofType(t.chrome.sent, 'play');
+  const [play] = ofType(t.chrome.posted, 'play');
   assert.match(play.sentences[play.start][0], /^Paragraph 5 talks/);
 });
 
 test('alt+click seeks to the paragraph start', async () => {
   const { chrome, document, c } = await started();
-  c.handle({ type: 'state', state: 'playing' });
+  fromFrame(c, { type: 'state', state: 'playing' });
   const p5 = document.getElementById('p5');
   const ev = altClick(document, p5.firstChild.parentElement);
   assert.equal(ev.defaultPrevented, true);
-  const [seek] = ofType(chrome.sent, 'seek');
+  const [seek] = ofType(chrome.posted, 'seek');
   assert.ok(seek, 'seek sent');
   assert.match(c.session.sentences[seek.index].text, /^Paragraph 5 talks/);
 
@@ -215,48 +325,48 @@ test('alt+click seeks to the paragraph start', async () => {
   const plain = new document.defaultView.Event('click', { bubbles: true, cancelable: true });
   p5.dispatchEvent(plain);
   assert.equal(plain.defaultPrevented, false);
-  assert.equal(ofType(chrome.sent, 'seek').length, 1);
+  assert.equal(ofType(chrome.posted, 'seek').length, 1);
 });
 
 test('alt+click on the article container itself does not seek', async () => {
   const { chrome, document, c } = await started();
-  c.handle({ type: 'state', state: 'playing' });
+  fromFrame(c, { type: 'state', state: 'playing' });
   // Empty space between paragraphs targets the wrapper; so do clicks on main and body.
   for (const el of [document.getElementById('art'), document.querySelector('main'), document.body]) {
     const ev = altClick(document, el);
     assert.equal(ev.defaultPrevented, false, el.tagName);
   }
   await new Promise((r) => setImmediate(r));
-  assert.equal(ofType(chrome.sent, 'seek').length, 0);
-  assert.equal(ofType(chrome.sent, 'play').length, 1);
+  assert.equal(ofType(chrome.posted, 'seek').length, 0);
+  assert.equal(ofType(chrome.posted, 'play').length, 1);
 });
 
 test('sentence-start moves the highlight', async () => {
   const { highlighter, c } = await started();
-  c.handle({ type: 'sentence-start', index: 2 });
+  fromFrame(c, { type: 'sentence-start', index: 2 });
   assert.equal(highlighter.shown, c.session.sentences[2]);
-  c.handle({ type: 'sentence-start', index: 3 });
+  fromFrame(c, { type: 'sentence-start', index: 3 });
   assert.equal(highlighter.shown, c.session.sentences[3]);
 });
 
 test('bar actions map to engine messages', async () => {
   const { chrome, bars, c } = await started();
   const act = bars[0].action;
-  const last = () => chrome.sent.at(-1);
+  const last = () => chrome.posted.at(-1);
   const n = c.session.sentences.length;
   const paraStart = c.session.sentences.findIndex((s) => s.paragraph === 1);
-  c.handle({ type: 'state', state: 'playing' });
+  fromFrame(c, { type: 'state', state: 'playing' });
 
-  c.handle({ type: 'sentence-start', index: 0 });
+  fromFrame(c, { type: 'sentence-start', index: 0 });
   act('next');
   assert.deepEqual(last(), { type: 'seek', index: 1 });
-  c.handle({ type: 'sentence-start', index: 1 });
+  fromFrame(c, { type: 'sentence-start', index: 1 });
   act('prev');
   assert.deepEqual(last(), { type: 'seek', index: 0 });
-  c.handle({ type: 'sentence-start', index: 0 });
+  fromFrame(c, { type: 'sentence-start', index: 0 });
   act('next-paragraph');
   assert.deepEqual(last(), { type: 'seek', index: paraStart });
-  c.handle({ type: 'sentence-start', index: paraStart + 1 });
+  fromFrame(c, { type: 'sentence-start', index: paraStart + 1 });
   act('prev-paragraph');
   assert.deepEqual(last(), { type: 'seek', index: paraStart });
 
@@ -269,7 +379,7 @@ test('bar actions map to engine messages', async () => {
   act('voice', 'bob');
   assert.deepEqual(last(), { type: 'set-voice', voice: 'bob' });
 
-  c.handle({ type: 'sentence-start', index: n - 1 });
+  fromFrame(c, { type: 'sentence-start', index: n - 1 });
   act('next');
   assert.deepEqual(last(), { type: 'stop' });
   assert.equal(c.session, null);
@@ -277,24 +387,63 @@ test('bar actions map to engine messages', async () => {
   // close sends stop
   const t = await started();
   t.bars[0].action('close');
-  assert.deepEqual(t.chrome.sent.at(-1), { type: 'stop' });
+  assert.deepEqual(t.chrome.posted.at(-1), { type: 'stop' });
+});
+
+test('closing the bar tells the service worker the session ended', async () => {
+  const t = await started();
+  t.chrome.sent.length = 0;
+  t.bars[0].action('close');
+  assert.deepEqual(ofType(t.chrome.sent, 'session-end'), [{ type: 'session-end' }]);
+
+  // Stopped from outside (another tab took over): no echo to the worker.
+  const u = await started();
+  u.chrome.sent.length = 0;
+  u.c.handle({ type: 'stop' });
+  assert.equal(ofType(u.chrome.sent, 'session-end').length, 0);
+});
+
+test('reaching the end of the text ends ownership', async () => {
+  for (const action of ['next', 'next-paragraph']) {
+    const t = await started();
+    const n = t.c.session.sentences.length;
+    fromFrame(t.c, { type: 'state', state: 'playing' });
+    fromFrame(t.c, { type: 'sentence-start', index: n - 1 });
+    t.chrome.sent.length = 0;
+    t.bars[0].action(action);
+    assert.ok(t.c.session === null, `${action}: session ended`);
+    assert.deepEqual(ofType(t.chrome.sent, 'session-end'), [{ type: 'session-end' }], action);
+  }
+
+  // The setup prompt replacing a running session ends it too.
+  const u = await started();
+  u.chrome.sent.length = 0;
+  u.c.handle({ type: 'setup-prompt' });
+  assert.ok(u.c.session === null, 'setup prompt: session ended');
+  assert.deepEqual(ofType(u.chrome.sent, 'session-end'), [{ type: 'session-end' }], 'setup prompt');
+
+  // Without a session there is nothing to end.
+  const v = setup();
+  const c = install(v.win, v.deps);
+  c.handle({ type: 'setup-prompt' });
+  assert.equal(ofType(v.chrome.sent, 'session-end').length, 0);
 });
 
 test('toggle pauses and resumes', async () => {
   const { chrome, c, bars } = await started();
-  c.handle({ type: 'state', state: 'playing' });
+  fromFrame(c, { type: 'state', state: 'playing' });
   c.handle({ type: 'toggle' });
-  assert.deepEqual(chrome.sent.at(-1), { type: 'pause' });
+  assert.deepEqual(chrome.posted.at(-1), { type: 'pause' });
   assert.equal(bars[0].states.at(-1), 'paused');
   c.handle({ type: 'toggle' });
-  assert.deepEqual(chrome.sent.at(-1), { type: 'resume' });
+  assert.deepEqual(chrome.posted.at(-1), { type: 'resume' });
   assert.equal(bars[0].states.at(-1), 'playing');
 });
 
 test('stop tears down bar, highlight and listeners', async () => {
   for (const how of ['message', 'close']) {
     const { chrome, document, highlighter, bars, c, clickListeners } = await started();
-    c.handle({ type: 'sentence-start', index: 1 });
+    fromFrame(c, { type: 'sentence-start', index: 1 });
     assert.equal(clickListeners.size, 1, how);
     if (how === 'message') c.handle({ type: 'stop' });
     else bars[0].action('close');
@@ -302,11 +451,26 @@ test('stop tears down bar, highlight and listeners', async () => {
     assert.equal(highlighter.shown, null, how);
     assert.equal(barHosts(document), 0, how);
     assert.equal(c.session, null, how);
-    const before = chrome.sent.length;
+    const before = chrome.posted.length;
     const ev = altClick(document, document.getElementById('p3'));
     assert.equal(ev.defaultPrevented, false, how);
-    assert.equal(chrome.sent.length, before, how);
+    assert.equal(chrome.posted.length, before, how);
   }
+});
+
+test('answers ping with whether a session is live', async () => {
+  const t = await started();
+  // The service worker asks over runtime messaging; the answer goes back through sendResponse.
+  const ask = () => {
+    let answer;
+    t.chrome.listeners.forEach((fn) => fn({ type: 'ping' }, {}, (r) => (answer = r)));
+    return answer;
+  };
+  assert.deepEqual(t.c.handle({ type: 'ping' }), { alive: true });
+  assert.deepEqual(ask(), { alive: true });
+  t.c.handle({ type: 'stop' });
+  assert.deepEqual(t.c.handle({ type: 'ping' }), { alive: false });
+  assert.deepEqual(ask(), { alive: false });
 });
 
 test('double injection keeps one session', async () => {
@@ -319,7 +483,7 @@ test('double injection keeps one session', async () => {
   await second.handle({ type: 'start', source: 'auto' });
   assert.equal(barHosts(t.document), 1);
   assert.equal(t.bars.length, 1);
-  assert.equal(ofType(t.chrome.sent, 'play').length, 2);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 2);
 });
 
 test('empty stored voice uses the first listed voice, asked once', async () => {
@@ -333,18 +497,18 @@ test('empty stored voice uses the first listed voice, asked once', async () => {
   await c.handle({ type: 'start', source: 'auto' });
   await c.handle({ type: 'start', source: 'auto' });
   assert.equal(calls, 1);
-  assert.ok(ofType(t.chrome.sent, 'play').every((p) => p.voice === 'first'));
+  assert.ok(ofType(t.chrome.posted, 'play').every((p) => p.voice === 'first'));
 });
 
 test('natural end keeps alt+click, which starts reading again there', async () => {
   const { chrome, document, c, clickListeners } = await started();
-  c.handle({ type: 'state', state: 'playing' });
-  c.handle({ type: 'state', state: 'idle' });
+  fromFrame(c, { type: 'state', state: 'playing' });
+  fromFrame(c, { type: 'state', state: 'ended' });
   assert.equal(clickListeners.size, 1, 'listener kept after the last sentence ended');
-  const before = ofType(chrome.sent, 'play').length;
+  const before = ofType(chrome.posted, 'play').length;
   const ev = altClick(document, document.getElementById('p6'));
   assert.equal(ev.defaultPrevented, true);
-  const plays = ofType(chrome.sent, 'play');
+  const plays = ofType(chrome.posted, 'play');
   assert.equal(plays.length, before + 1);
   assert.match(plays.at(-1).sentences[plays.at(-1).start][0], /^Paragraph 6 talks/);
 });
@@ -360,7 +524,7 @@ test('stop during start does not start a session', async () => {
   release({ ok: true, voices: ['a'] });
   await starting;
   assert.ok(c.session === null, 'no session'); // not assert.equal: inspecting a session walks the DOM
-  assert.equal(ofType(t.chrome.sent, 'play').length, 0);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 0);
   assert.equal(barHosts(t.document), 0);
 });
 
@@ -375,7 +539,7 @@ test('setup prompt during start cancels the pending start', async () => {
   release({ ok: true, voices: ['a'] });
   await starting;
   assert.ok(c.session === null, 'no session'); // not assert.equal: inspecting a session walks the DOM
-  assert.equal(ofType(t.chrome.sent, 'play').length, 0);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 0);
   assert.equal(t.bars.length, 1, 'only the setup bar');
   assert.deepEqual(t.bars[0].states, ['setup']);
   assert.equal(barHosts(t.document), 1, 'setup bar stays');
@@ -406,7 +570,7 @@ test('default listVoices asks the service worker', async () => {
   const c = createController({ ...deps, doc: t.document, win: t.win, chrome: t.chrome });
   await c.handle({ type: 'start', source: 'auto' });
   assert.equal(ofType(t.chrome.sent, 'list-voices').length, 1);
-  assert.equal(ofType(t.chrome.sent, 'play')[0].voice, 'sw-voice');
+  assert.equal(ofType(t.chrome.posted, 'play')[0].voice, 'sw-voice');
 });
 
 test('retry after nothing to read picks sentences again', async () => {
@@ -414,30 +578,30 @@ test('retry after nothing to read picks sentences again', async () => {
   const c = install(t.win, t.deps);
   await c.handle({ type: 'start', source: 'auto' });
   assert.equal(c.session.state, 'error');
-  assert.equal(ofType(t.chrome.sent, 'play').length, 0);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 0);
   // The page finished rendering its article meanwhile.
   t.document.getElementById('m').innerHTML = `<article>${[1, 2, 3, 4].map(longParagraph).join('')}</article>`;
   await t.bars[0].action('retry');
-  const [play] = ofType(t.chrome.sent, 'play');
+  const [play] = ofType(t.chrome.posted, 'play');
   assert.ok(play, 'play sent');
   assert.ok(play.sentences.length > 0);
 });
 
 test('a new start with nothing to read stops the running audio', async () => {
   const t = await started();
-  assert.equal(ofType(t.chrome.sent, 'play').length, 1);
-  assert.equal(ofType(t.chrome.sent, 'stop').length, 0);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+  assert.equal(ofType(t.chrome.posted, 'stop').length, 0);
   // The page now has nothing readable; a fresh start must not leave the old audio playing.
   t.document.body.innerHTML = '<main></main>';
   await t.c.handle({ type: 'start', source: 'auto' });
   assert.equal(t.c.session.state, 'error');
-  assert.equal(ofType(t.chrome.sent, 'stop').length, 1);
-  assert.equal(ofType(t.chrome.sent, 'play').length, 1);
+  assert.equal(ofType(t.chrome.posted, 'stop').length, 1);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
 });
 
 test('an older start finishing after a newer one has no side effects', async () => {
   const t = await started();
-  t.chrome.sent.length = 0;
+  t.chrome.posted.length = 0;
   // The first settings load is slow, so the older start resumes after the newer one played.
   let release;
   const get = t.chrome.storage.sync.get;
@@ -450,33 +614,33 @@ test('an older start finishing after a newer one has no side effects', async () 
   const older = t.c.handle({ type: 'start', source: 'selection' });
   await new Promise((r) => setImmediate(r));
   await t.c.handle({ type: 'start', source: 'auto' });
-  assert.equal(ofType(t.chrome.sent, 'play').length, 1);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
   const statesBefore = t.bars[0].states.length;
   release();
   await older;
-  assert.equal(ofType(t.chrome.sent, 'stop').length, 0, 'no stop for the newer playback');
+  assert.equal(ofType(t.chrome.posted, 'stop').length, 0, 'no stop for the newer playback');
   assert.equal(t.bars[0].states.length, statesBefore, 'bar untouched');
   assert.equal(t.c.session.state, 'loading');
 });
 
 test('autoscroll setting is read at start and passed to the highlighter', async () => {
   const on = await started();
-  on.c.handle({ type: 'sentence-start', index: 1 });
+  fromFrame(on.c, { type: 'sentence-start', index: 1 });
   assert.equal(on.highlighter.opts.scroll, true);
 
   const off = await started({ stored: { autoscroll: false } });
-  off.c.handle({ type: 'sentence-start', index: 1 });
+  fromFrame(off.c, { type: 'sentence-start', index: 1 });
   assert.equal(off.highlighter.shown, off.c.session.sentences[1], 'still highlighted');
   assert.equal(off.highlighter.opts.scroll, false);
 });
 
 test('autoscroll toggle on the bar saves the setting and stops scrolling', async () => {
   const { chrome, bars, highlighter, c } = await started();
-  c.handle({ type: 'sentence-start', index: 1 });
+  fromFrame(c, { type: 'sentence-start', index: 1 });
   bars[0].action('autoscroll', false);
   await new Promise((r) => setImmediate(r));
   assert.equal(chrome.stored.autoscroll, false);
-  c.handle({ type: 'sentence-start', index: 2 });
+  fromFrame(c, { type: 'sentence-start', index: 2 });
   assert.equal(highlighter.opts.scroll, false);
   // Turning it back on brings the current sentence into view right away.
   bars[0].action('autoscroll', true);
@@ -484,7 +648,40 @@ test('autoscroll toggle on the bar saves the setting and stops scrolling', async
   assert.equal(chrome.stored.autoscroll, true);
   assert.equal(highlighter.shown, c.session.sentences[2]);
   assert.equal(highlighter.opts.scroll, true);
-  assert.equal(ofType(chrome.sent, 'autoscroll').length, 0, 'nothing sent to the engine');
+  assert.equal(ofType(chrome.posted, 'autoscroll').length, 0, 'nothing sent to the engine');
+});
+
+test("the highlighter gets the bar's top edge", async () => {
+  const t = setup();
+  let opts = null;
+  t.deps.createHighlighter = (o) => {
+    opts = o;
+    return t.highlighter;
+  };
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  t.shadowRoots.at(-1).querySelector('.bar').getBoundingClientRect = () => ({ top: 740, bottom: 800, height: 60, left: 10, right: 380 });
+  assert.equal(typeof opts?.obscuredBottom, 'function');
+  assert.equal(opts.obscuredBottom(), 740);
+});
+
+test('opening the fold-out re-checks the current sentence', async () => {
+  const { document, shadowRoots, highlighter, highlights, c } = await started();
+  fromFrame(c, { type: 'sentence-start', index: 1 });
+  const more = shadowRoots.at(-1).querySelector('button.more');
+  const before = highlights.length;
+  more.dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
+  // The bar grew: the sentence is shown again, scrolling only if it is now under the bar.
+  assert.equal(highlights.length, before + 1);
+  assert.ok(highlighter.shown === c.session.sentences[1]);
+  assert.equal(highlighter.opts.scroll, true);
+  // Closing it shrinks the bar: nothing to re-check.
+  more.dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(highlights.length, before + 1);
+  // Autoscroll off: opening it leaves the page alone.
+  c.session.autoscroll = false;
+  more.dispatchEvent(new document.defaultView.Event('click', { bubbles: true }));
+  assert.equal(highlights.length, before + 1);
 });
 
 // A Slack-like page with fake layout, and "Read from here" on the hovered element.
@@ -501,7 +698,7 @@ test('from-here on an app page reads only the clicked pane', async () => {
   const t = slackSetup('t2');
   const c = install(t.win, t.deps);
   await c.handle({ type: 'start', source: 'from-here' });
-  const [play] = ofType(t.chrome.sent, 'play');
+  const [play] = ofType(t.chrome.posted, 'play');
   const texts = play.sentences.map((p) => p.join(' '));
   assert.ok(texts.slice(play.start, play.start + 2).some((x) => x.startsWith('Thursday works')), texts.join(' | '));
   assert.ok(!texts.some((x) => CHANNELS.some((ch) => x.includes(ch))), texts.join(' | '));
@@ -512,24 +709,24 @@ test('alt+click outside the current source starts reading that pane', async () =
   const t = slackSetup('t2');
   const c = install(t.win, t.deps);
   await c.handle({ type: 'start', source: 'from-here' });
-  c.handle({ type: 'state', state: 'playing' });
+  fromFrame(c, { type: 'state', state: 'playing' });
 
   // On the player bar (a page-level host element): ignored.
   const host = t.document.querySelector('[data-omnivoice-reader="bar"]');
   assert.equal(altClick(t.document, host).defaultPrevented, false);
-  assert.equal(ofType(t.chrome.sent, 'play').length, 1);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
 
   const ev = altClick(t.document, t.document.querySelector('#c2 .text'));
   assert.equal(ev.defaultPrevented, true);
   await new Promise((r) => setImmediate(r));
-  const plays = ofType(t.chrome.sent, 'play');
+  const plays = ofType(t.chrome.posted, 'play');
   assert.equal(plays.length, 2);
   const last = plays.at(-1);
   const texts = last.sentences.map((p) => p.join(' '));
   assert.ok(texts.slice(last.start, last.start + 2).some((x) => x.startsWith('I can take a look')), texts.join(' | '));
   assert.ok(!texts.some((x) => x.includes('Thursday works')), texts.join(' | '));
   assert.equal(t.bars.length, 1, 'the running bar is reused');
-  assert.equal(ofType(t.chrome.sent, 'seek').length, 0);
+  assert.equal(ofType(t.chrome.posted, 'seek').length, 0);
 });
 
 test('alt+click inside a whole-page session narrows to the clicked pane', async () => {
@@ -537,8 +734,8 @@ test('alt+click inside a whole-page session narrows to the clicked pane', async 
   const t = slackSetup('t2');
   const c = install(t.win, t.deps);
   await c.handle({ type: 'start', source: 'auto' });
-  c.handle({ type: 'state', state: 'playing' });
-  const [first] = ofType(t.chrome.sent, 'play');
+  fromFrame(c, { type: 'state', state: 'playing' });
+  const [first] = ofType(t.chrome.posted, 'play');
   const all = first.sentences.map((p) => p.join(' '));
   assert.ok(all.some((x) => x.includes('nightly build')), all.join(' | '));
   assert.ok(all.some((x) => x.startsWith('Thursday works')), all.join(' | '));
@@ -546,7 +743,7 @@ test('alt+click inside a whole-page session narrows to the clicked pane', async 
   const ev = altClick(t.document, t.document.querySelector('#t2 .text'));
   assert.equal(ev.defaultPrevented, true);
   await new Promise((r) => setImmediate(r));
-  const plays = ofType(t.chrome.sent, 'play');
+  const plays = ofType(t.chrome.posted, 'play');
   assert.equal(plays.length, 2);
   const last = plays.at(-1);
   const texts = last.sentences.map((p) => p.join(' '));
@@ -554,14 +751,14 @@ test('alt+click inside a whole-page session narrows to the clicked pane', async 
   assert.ok(!texts.some((x) => CHANNELS.some((ch) => x.includes(ch))), texts.join(' | '));
   assert.ok(!texts.some((x) => x.includes('nightly build')), texts.join(' | '));
   assert.equal(t.bars.length, 1, 'the running bar is reused');
-  assert.equal(ofType(t.chrome.sent, 'seek').length, 0);
+  assert.equal(ofType(t.chrome.posted, 'seek').length, 0);
 });
 
 test('voice chosen on the bar is saved as the stored voice', async () => {
   const { chrome, bars, c } = await started({ stored: { voice: 'alba', speed: 1.2 } });
   bars[0].action('voice', 'bob');
   await new Promise((r) => setImmediate(r));
-  assert.deepEqual(chrome.sent.at(-1), { type: 'set-voice', voice: 'bob' });
+  assert.deepEqual(chrome.posted.at(-1), { type: 'set-voice', voice: 'bob' });
   assert.equal(chrome.stored.voice, 'bob');
   // Speed on the bar stays session-only.
   bars[0].action('speed', 1.5);
@@ -569,5 +766,713 @@ test('voice chosen on the bar is saved as the stored voice', async () => {
   assert.equal(chrome.stored.speed, 1.2);
   // The next session starts with the saved voice.
   await c.handle({ type: 'start', source: 'auto' });
-  assert.equal(ofType(chrome.sent, 'play').at(-1).voice, 'bob');
+  assert.equal(ofType(chrome.posted, 'play').at(-1).voice, 'bob');
+});
+
+// Starts a session and records the bar's closed shadow root, so the test can tap its controls.
+async function startedWithBarRoot(opts) {
+  const t = setup(opts);
+  const roots = [];
+  const realCreate = t.document.createElement.bind(t.document);
+  t.document.createElement = (name, ...rest) => {
+    const el = realCreate(name, ...rest);
+    const attach = el.attachShadow;
+    el.attachShadow = function (init) {
+      const root = attach.call(this, init);
+      roots.push(root);
+      return root;
+    };
+    return el;
+  };
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  const tap = (el) => el.dispatchEvent(new t.document.defaultView.Event('click', { bubbles: true, cancelable: true }));
+  return { ...t, c, root: roots[0], tap };
+}
+
+const settle = () => new Promise((r) => setImmediate(r));
+
+test('speed chip cycles presets and saves the default', async () => {
+  const { chrome, root, tap } = await startedWithBarRoot({ stored: { voice: 'alba', speed: 1 } });
+  const chip = root.querySelector('button.speed-chip');
+  assert.equal(chip.textContent.trim(), '1.0×');
+  for (const expected of [1.2, 1.5, 2]) {
+    tap(chip);
+    await settle();
+    assert.deepEqual(chrome.posted.at(-1), { type: 'set-speed', speed: expected });
+    assert.equal(chip.textContent.trim(), `${expected.toFixed(1)}×`);
+    assert.equal(chrome.stored.speed, expected, `${expected} saved as the default`);
+  }
+});
+
+test('voice change from the fold-out restarts the sentence', async () => {
+  const { chrome, root, tap, c, document } = await startedWithBarRoot({ stored: { voice: 'alba', speed: 1 } });
+  fromFrame(c, { type: 'state', state: 'playing' });
+  // Offer a second voice in the select, as an engine voice list would.
+  const voice = root.querySelector('select[aria-label="Voice"]');
+  const opt = document.createElement('option');
+  opt.value = 'bob';
+  opt.textContent = 'bob';
+  voice.appendChild(opt);
+  tap(root.querySelector('button.more'));
+  assert.ok(voice.closest('.fold'), 'voice select lives in the fold-out');
+  assert.equal(voice.closest('[hidden]'), null, 'fold-out is open');
+  // linkedom's select.value is read-only: pick the option the way the user's tap would.
+  for (const o of voice.querySelectorAll('option')) o.removeAttribute('selected');
+  opt.setAttribute('selected', '');
+  assert.equal(voice.value, 'bob');
+  voice.dispatchEvent(new document.defaultView.Event('change', { bubbles: true }));
+  await settle();
+  // set-voice makes the player drop prefetched audio and restart the current sentence.
+  assert.deepEqual(chrome.posted.at(-1), { type: 'set-voice', voice: 'bob' });
+  assert.equal(chrome.stored.voice, 'bob');
+});
+
+// Player frame: the content script hosts the extension-origin audio frame in the bar's shadow
+// root and speaks the Port protocol with it.
+
+test('start injects one player frame into the shadow host', async () => {
+  const t = await startedWithBarRoot();
+  const frames = t.root.querySelectorAll('iframe');
+  assert.equal(frames.length, 1);
+  const [frame] = frames;
+  assert.equal(frame.getAttribute('src'), 'chrome-extension://test/src/player.html');
+  assert.equal(frame.getAttribute('allow'), 'autoplay');
+  const style = frame.getAttribute('style').replace(/\s/g, '');
+  for (const rule of ['width:1px', 'height:1px', 'opacity:0', 'border:0', 'position:fixed', 'pointer-events:none']) {
+    assert.ok(style.includes(rule), `${rule} in ${style}`);
+  }
+  assert.equal(t.document.querySelectorAll('iframe').length, 0, 'not in the page DOM');
+  // A new start inside the session reuses the frame and its port.
+  await t.c.handle({ type: 'start', source: 'auto' });
+  assert.equal(t.frames.length, 1);
+  assert.equal(t.root.querySelectorAll('iframe').length, 1);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 2);
+});
+
+test('sends play with the page title when the frame connects', async () => {
+  const t = setup({ autoConnect: false, stored: { voice: 'alba', speed: 1.2 } });
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  assert.equal(t.chrome.posted.length, 0, 'nothing to send before the frame connects');
+  t.chrome.connect('player');
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 1);
+  const [play] = plays;
+  assert.equal(play.title, 'Test');
+  assert.equal(play.start, 0);
+  assert.equal(play.voice, 'alba');
+  assert.equal(play.speed, 1.2);
+  assert.equal(play.sentences.length, c.session.sentences.length);
+  assert.equal(ofType(t.chrome.sent, 'play').length, 0, 'no play through the service worker');
+});
+
+test('ignores ports with another name', async () => {
+  const t = setup({ autoConnect: false });
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  const other = t.chrome.connect('something-else');
+  assert.equal(t.chrome.posted.length, 0);
+  other.emit({ type: 'sentence-start', index: 2 });
+  assert.equal(t.highlighter.shown, null, 'its events are not followed');
+  t.chrome.connect('player');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+});
+
+test('frame events drive the highlight and the bar', async () => {
+  const t = await started();
+  const [port] = t.chrome.ports;
+  port.emit({ type: 'state', state: 'playing' });
+  port.emit({ type: 'sentence-start', index: 2 });
+  assert.equal(t.highlighter.shown, t.c.session.sentences[2]);
+  assert.equal(t.c.session.state, 'playing');
+  port.emit({ type: 'error', message: 'Engine said no' });
+  assert.equal(t.c.session.state, 'error');
+  assert.equal(t.bars[0].states.at(-1), 'error');
+  port.emit({ type: 'state', state: 'ended' });
+  assert.equal(t.c.session.state, 'idle');
+  assert.equal(t.highlighter.shown, null);
+});
+
+test('re-injects once and resumes from the current sentence on disconnect', async () => {
+  const t = await startedWithBarRoot();
+  const [port] = t.chrome.ports;
+  port.emit({ type: 'state', state: 'playing' });
+  port.emit({ type: 'sentence-start', index: 5 });
+  t.chrome.posted.length = 0;
+  port.drop();
+  await settle();
+  assert.equal(t.frames.length, 2, 'one new frame');
+  assert.equal(t.root.querySelectorAll('iframe').length, 1, 'the lost frame is gone');
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 1);
+  assert.equal(plays[0].start, 5);
+  // Commands go to the new port.
+  t.bars[0].action('toggle');
+  assert.deepEqual(t.chrome.posted.at(-1), { type: 'pause' });
+});
+
+test('second disconnect shows the bar error', async () => {
+  const t = await startedWithBarRoot();
+  t.chrome.ports[0].emit({ type: 'sentence-start', index: 3 });
+  t.chrome.ports[0].drop();
+  await settle();
+  t.chrome.ports[1].emit({ type: 'state', state: 'playing' });
+  t.chrome.ports[1].drop();
+  await settle();
+  assert.equal(t.frames.length, 2, 'no third frame on its own');
+  assert.equal(t.c.session.state, 'error');
+  assert.equal(t.bars[0].states.at(-1), 'error');
+  const error = t.root.querySelector('.error');
+  assert.equal(error.hasAttribute('hidden'), false);
+  assert.match(error.querySelector('.message').textContent, /Audio player stopped/);
+  // Retry brings a fresh frame and plays from the same sentence.
+  t.chrome.posted.length = 0;
+  await t.bars[0].action('retry');
+  await settle();
+  assert.equal(t.frames.length, 3);
+  const [play] = ofType(t.chrome.posted, 'play');
+  assert.equal(play.start, 3);
+});
+
+test('close stops and removes the frame', async () => {
+  const t = await startedWithBarRoot();
+  const [frame] = t.frames;
+  const [port] = t.chrome.ports;
+  const post = port.postMessage;
+  let attachedAtStop = null;
+  port.postMessage = (msg) => {
+    if (msg.type === 'stop') attachedAtStop = t.root.querySelector('iframe') === frame;
+    return post(msg);
+  };
+  t.chrome.posted.length = 0;
+  t.bars[0].action('close');
+  assert.deepEqual(t.chrome.posted, [{ type: 'stop' }]);
+  assert.equal(attachedAtStop, true, 'stop is sent before the frame goes');
+  assert.equal(t.root.querySelector('iframe'), null, 'frame removed');
+  assert.equal(t.c.session, null);
+  // The port closing after the frame went is not a lost frame.
+  port.drop();
+  await settle();
+  assert.equal(t.frames.length, 1);
+});
+
+test('re-attaches the bar when the page removed it', async () => {
+  // The page dropped the bar's host (and the frame inside it) mid-playback.
+  const t = await started();
+  fromFrame(t.c, { type: 'state', state: 'playing' });
+  fromFrame(t.c, { type: 'sentence-start', index: 2 });
+  t.document.querySelector('[data-omnivoice-reader="bar"]').remove();
+  t.chrome.posted.length = 0;
+  t.chrome.ports[0].drop();
+  await settle();
+  assert.equal(barHosts(t.document), 1, 'host back in the page before the frame is re-injected');
+  assert.equal(t.frames.length, 2);
+  assert.equal(t.frames[1].isConnected, true, 'new frame is in the document');
+  assert.equal(ofType(t.chrome.posted, 'play')[0].start, 2);
+
+  // Removed while idle: a later toolbar start puts it back and plays in a live frame.
+  const u = await started();
+  fromFrame(u.c, { type: 'state', state: 'ended' });
+  u.document.querySelector('[data-omnivoice-reader="bar"]').remove();
+  u.chrome.ports[0].drop();
+  u.chrome.posted.length = 0;
+  await u.c.handle({ type: 'start', source: 'auto' });
+  await settle();
+  assert.equal(barHosts(u.document), 1);
+  assert.equal(u.frames.at(-1).isConnected, true);
+  assert.equal(ofType(u.chrome.posted, 'play').length, 1);
+});
+
+test('frame that never connects shows an error after 5 seconds', async () => {
+  const t = await startedWithBarRoot({ autoConnect: false });
+  assert.equal(t.c.session.state, 'loading');
+  t.clock.run(4999);
+  assert.equal(t.c.session.state, 'loading', 'still waiting before 5 s');
+  t.clock.run(5000);
+  assert.equal(t.c.session.state, 'error');
+  assert.equal(t.bars[0].states.at(-1), 'error');
+  assert.match(t.root.querySelector('.error .message').textContent, /Audio player did not start/);
+  assert.equal(t.root.querySelector('iframe'), null, 'the dead frame is removed');
+  // A late connect of that frame is not taken.
+  t.chrome.connect('player');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 0);
+  // Retry injects a fresh frame that connects and plays.
+  await t.bars[0].action('retry');
+  t.chrome.connect('player');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+  assert.equal(t.c.session.state, 'loading');
+  // A connected frame is not timed out.
+  t.clock.run(10000);
+  assert.equal(t.c.session.state, 'loading');
+});
+
+test('ignores a player port from another extension page', async () => {
+  const t = setup({ autoConnect: false });
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  const other = t.chrome.connect('player', { url: 'chrome-extension://test/src/options.html' });
+  assert.equal(t.chrome.posted.length, 0);
+  assert.equal(other.connected, false, 'disconnected');
+  other.emit({ type: 'sentence-start', index: 2 });
+  assert.ok(t.highlighter.shown === null, 'not highlighted'); // not assert.equal: inspecting a sentence walks the DOM
+  const none = t.chrome.connect('player', null);
+  assert.equal(none.connected, false, 'no sender: disconnected');
+  t.chrome.connect('player');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+});
+
+test('ignores sentence-start sent over runtime messages', async () => {
+  const t = await started();
+  const [listener] = t.chrome.listeners;
+  listener({ type: 'sentence-start', index: 2 });
+  assert.ok(t.highlighter.shown === null, 'not highlighted'); // not assert.equal: inspecting a sentence walks the DOM
+  listener({ type: 'state', state: 'error', error: 'x' });
+  assert.equal(t.c.session.state, 'loading');
+  // Commands still arrive that way.
+  listener({ type: 'stop' });
+  assert.ok(t.c.session === null);
+});
+
+// Selection actions (player bar strip, mockup option A "Text selected").
+
+// A page selection the test can change; collapsing it (as the controller does) empties it.
+function liveSelection() {
+  let current = null;
+  const sel = {
+    get rangeCount() {
+      return current ? 1 : 0;
+    },
+    get isCollapsed() {
+      return !current;
+    },
+    getRangeAt: () => current.getRangeAt(0),
+    removeAllRanges: () => {
+      current = null;
+    },
+    select: (startNode, startOffset, endNode, endOffset) => {
+      current = fakeSelection(startNode, startOffset, endNode, endOffset);
+    },
+  };
+  return sel;
+}
+
+const selectionChange = (document) => document.dispatchEvent(new document.defaultView.Event('selectionchange'));
+const strip = (t) => t.shadowRoots.at(-1)?.querySelector('.selection-actions') ?? null;
+const stripButton = (t, label) => strip(t).querySelector(`button[aria-label="${label}"]`);
+
+function tap(document, el) {
+  const ev = new document.defaultView.Event('click', { bubbles: true, cancelable: true });
+  el.dispatchEvent(ev);
+  return ev;
+}
+
+async function startedWithSelection() {
+  const sel = liveSelection();
+  const t = await started({ selection: () => sel });
+  fromFrame(t.c, { type: 'state', state: 'playing' });
+  return { ...t, sel };
+}
+
+test('selection strip shows above the row during a session', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  assert.equal(strip(t), null, 'debounced: nothing before 150 ms');
+  t.clock.run(150);
+  const s = strip(t);
+  assert.ok(s, 'strip shown');
+  const bar = t.shadowRoots.at(-1).querySelector('.bar');
+  const row = t.shadowRoots.at(-1).querySelector('.row');
+  // Its own block above the row inside the bar, so the row keeps its left offset.
+  assert.ok(s.parentNode === bar);
+  assert.ok(s.nextElementSibling === row);
+  assert.ok(row.parentNode === bar);
+  const buttons = [...s.querySelectorAll('button')];
+  assert.deepEqual(buttons.map((b) => b.textContent.trim()), ['From here', 'Selection']);
+  assert.ok(buttons.every((b) => b.querySelector('svg')), 'inline svg play icons');
+
+  // A selection inside the bar's own host is not a page selection.
+  const t2 = await startedWithSelection();
+  const host = t2.document.querySelector('[data-omnivoice-reader="bar"]');
+  const inner = t2.document.createTextNode('bar text');
+  host.appendChild(inner);
+  t2.sel.select(inner, 0, inner, 3);
+  selectionChange(t2.document);
+  t2.clock.run(150);
+  assert.equal(strip(t2), null);
+});
+
+test('showing the selection strip re-checks the current sentence', async () => {
+  const t = await startedWithSelection();
+  fromFrame(t.c, { type: 'sentence-start', index: 1 });
+  const before = t.highlights.length;
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.ok(strip(t));
+  assert.equal(t.highlights.length, before + 1);
+  assert.ok(t.highlighter.shown === t.c.session.sentences[1]);
+  assert.equal(t.highlighter.opts.scroll, true);
+  // The strip was already shown: a grown selection does not re-check again.
+  t.sel.select(word, 0, word, 12);
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.equal(t.highlights.length, before + 1);
+});
+
+test('strip hides when the selection collapses', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.ok(strip(t));
+  t.sel.removeAllRanges();
+  selectionChange(t.document);
+  t.clock.run(150);
+  assert.equal(strip(t), null);
+});
+
+test('no strip without a session', async () => {
+  const sel = liveSelection();
+  const t = setup({ selection: () => sel });
+  const c = install(t.win, t.deps);
+  const word = t.document.getElementById('p4').firstChild;
+  sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  assert.equal(t.clock.timers.length, 0, 'listener does no work');
+  assert.equal(barHosts(t.document), 0);
+
+  // After the session ends the listener is gone too.
+  await c.handle({ type: 'start', source: 'auto' });
+  c.onAction('close');
+  const before = t.clock.timers.length;
+  selectionChange(t.document);
+  assert.equal(t.clock.timers.length, before);
+  t.clock.run(150);
+  assert.equal(barHosts(t.document), 0);
+});
+
+test('from here starts at the selection start and clears it', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 10, word, 20);
+  selectionChange(t.document);
+  t.clock.run(150);
+  tap(t.document, stripButton(t, 'Read from here'));
+  assert.equal(t.sel.isCollapsed, true, 'selection collapsed');
+  assert.equal(strip(t), null, 'strip gone');
+  await new Promise((r) => setImmediate(r));
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  const play = plays[1];
+  assert.match(play.sentences[play.start][0], /^Paragraph 4 talks/);
+  assert.match(play.sentences[0][0], /Title of the article/, 'reads on through the article');
+  assert.equal(t.c.session.startMsg.source, 'from-here');
+});
+
+test('selection button reads only the selected sentences', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p2').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  tap(t.document, stripButton(t, 'Read selection'));
+  assert.equal(t.sel.isCollapsed, true, 'selection collapsed');
+  assert.equal(strip(t), null, 'strip gone');
+  await new Promise((r) => setImmediate(r));
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  const play = plays[1];
+  assert.equal(play.start, 0);
+  assert.equal(play.sentences.length, 2);
+  assert.match(play.sentences[0][0], /^Paragraph 2 talks/);
+  assert.match(play.sentences[1][0], /^It keeps going/);
+  // Reading ends after the second sentence.
+  fromFrame(t.c, { type: 'sentence-start', index: 1 });
+  fromFrame(t.c, { type: 'state', state: 'ended' });
+  assert.equal(t.c.session.state, 'idle');
+});
+
+test('a tap that clears the selection first still reads it', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p3').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  const button = stripButton(t, 'Read selection');
+  // Touch: the tap collapses the selection before the click lands.
+  t.sel.removeAllRanges();
+  tap(t.document, button);
+  await new Promise((r) => setImmediate(r));
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  assert.match(plays[1].sentences[0][0], /^Paragraph 3 talks/);
+  assert.equal(plays[1].sentences.length, 2);
+});
+
+test('selection strip waits 150 ms', async () => {
+  const t = await startedWithSelection();
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  t.clock.run(149);
+  assert.ok(strip(t) === null, 'not yet at 149 ms');
+  t.clock.run(150);
+  assert.ok(strip(t), 'shown at 150 ms');
+});
+
+test('closing the session removes the selection listener', async () => {
+  const t = await startedWithSelection();
+  const handler = t.c.session.onSelectionChange;
+  const removed = [];
+  const remove = t.document.removeEventListener;
+  t.document.removeEventListener = (type, fn, opts) => {
+    removed.push([type, fn]);
+    return remove(type, fn, opts);
+  };
+  const word = t.document.getElementById('p4').firstChild;
+  t.sel.select(word, 0, word, 9);
+  selectionChange(t.document);
+  const pending = t.clock.timers.at(-1);
+  assert.ok(pending.ms === 150 && !pending.done, 'debounce timer pending');
+  t.bars[0].action('close');
+  assert.ok(
+    removed.some(([type, fn]) => type === 'selectionchange' && fn === handler),
+    'selectionchange listener removed',
+  );
+  assert.equal(pending.done, true, 'pending debounce timer cleared');
+});
+
+test('a frame in a removed bar is not reused', async () => {
+  // The page removes the bar before its frame connected: a frame in a detached host never loads.
+  const t = await started({ autoConnect: false });
+  t.document.querySelector('[data-omnivoice-reader="bar"]').remove();
+  await t.c.handle({ type: 'start', source: 'auto' });
+  assert.equal(barHosts(t.document), 1, 'bar back in the page');
+  assert.equal(t.frames.length, 2, 'a fresh frame');
+  assert.ok(t.frames[0].isConnected === false, 'the old frame is dropped');
+  assert.ok(t.frames[1].isConnected === true, 'the new frame is in the document');
+  const port = t.chrome.connect('player');
+  assert.equal(port.connected, true);
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+  // The first frame's connect timeout does not kill the new one.
+  t.clock.run(5000);
+  assert.equal(t.c.session.state, 'loading');
+  assert.equal(port.connected, true);
+});
+
+test('a late frame connect after the timeout is disconnected', async () => {
+  const t = await started({ autoConnect: false });
+  t.clock.run(5000);
+  assert.equal(t.c.session.state, 'error');
+  const late = t.chrome.connect('player');
+  assert.equal(late.connected, false, 'late port disconnected');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 0);
+});
+
+test('resume after a lost frame re-attaches the bar', async () => {
+  const t = await started();
+  fromFrame(t.c, { type: 'state', state: 'playing' });
+  fromFrame(t.c, { type: 'sentence-start', index: 3 });
+  t.bars[0].action('toggle');
+  assert.equal(t.c.session.state, 'paused');
+  // The page drops the bar (and the frame in it) while paused.
+  t.document.querySelector('[data-omnivoice-reader="bar"]').remove();
+  t.chrome.ports[0].drop();
+  await settle();
+  assert.equal(t.frames.length, 1, 'no new frame while paused');
+  t.chrome.posted.length = 0;
+  t.bars[0].action('toggle');
+  await settle();
+  assert.equal(barHosts(t.document), 1, 'bar back in the page');
+  assert.equal(t.frames.length, 2);
+  assert.ok(t.frames[1].isConnected === true, 'new frame is in the document');
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 1);
+  assert.equal(plays[0].start, 3);
+});
+
+test('refuses a player port from a look-alike URL', async () => {
+  const t = setup({ autoConnect: false });
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  for (const url of [
+    'chrome-extension://test/evil/player.html',
+    'chrome-extension://other/src/player.html',
+    'https://evil.example/src/player.html',
+    // The real player URL embedded as a substring must not pass either.
+    `https://evil.example/?u=${t.chrome.runtime.getURL('src/player.html')}`,
+  ]) {
+    const port = t.chrome.connect('player', { url });
+    assert.equal(port.connected, false, url);
+  }
+  assert.equal(t.chrome.posted.length, 0);
+  t.chrome.connect('player');
+  assert.equal(ofType(t.chrome.posted, 'play').length, 1);
+});
+
+test('retry after an error replays the selected sentences', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p2').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  tap(t.document, stripButton(t, 'Read selection'));
+  await settle();
+  const picked = ofType(t.chrome.posted, 'play').at(-1).sentences;
+  assert.equal(picked.length, 2);
+  fromFrame(t.c, { type: 'sentence-start', index: 1 });
+  fromFrame(t.c, { type: 'error', message: 'Engine said no' });
+  assert.equal(t.c.session.state, 'error');
+  // The page selection is gone by now: retry must not pick again.
+  t.chrome.posted.length = 0;
+  await t.bars[0].action('retry');
+  await settle();
+  const [play] = ofType(t.chrome.posted, 'play');
+  assert.ok(play, 'play sent');
+  assert.deepEqual(play.sentences, picked);
+  assert.equal(play.start, 1);
+});
+
+test('a tap reads the selection shown even after its live range collapsed', async () => {
+  const t = await startedWithSelection();
+  const text = t.document.getElementById('p3').firstChild;
+  t.sel.select(text, 0, text, text.data.length);
+  selectionChange(t.document);
+  t.clock.run(150);
+  // Touch: the tap clears the selection, and the browser collapses its live range in place.
+  const range = t.sel.getRangeAt(0);
+  t.sel.removeAllRanges();
+  Object.assign(range, { endContainer: range.startContainer, endOffset: range.startOffset, commonAncestorContainer: range.startContainer });
+  tap(t.document, stripButton(t, 'Read selection'));
+  await settle();
+  const plays = ofType(t.chrome.posted, 'play');
+  assert.equal(plays.length, 2);
+  assert.equal(plays[1].sentences.length, 2);
+  assert.match(plays[1].sentences[0][0], /^Paragraph 3 talks/);
+});
+
+// Start-point discovery: the one-time tip in the bar.
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+const tip = (t) => t.shadowRoots.at(-1)?.querySelector('.tip') ?? null;
+const tipText = (t) => tip(t)?.querySelector('.tip-text')?.textContent ?? null;
+const DESKTOP_TIP = 'Tip: Alt+click a paragraph to read from there.';
+const TOUCH_TIP = 'Tip: select text to read from there.';
+const asTouch = (t) => {
+  t.win.matchMedia = (q) => ({ matches: q === '(pointer: coarse)' });
+};
+
+async function startedWithTip({ local = {}, touch = false, selection } = {}) {
+  const t = setup({ local, selection });
+  if (touch) asTouch(t);
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  await flush();
+  return { ...t, c, local };
+}
+
+test('first session shows the Alt+click tip once on desktop', async () => {
+  const t = await startedWithTip();
+  assert.ok(tipText(t) === DESKTOP_TIP, `tip text: ${tipText(t)}`);
+  assert.ok(t.local.tipShown === true, 'flag written when shown');
+  // A thin line above the row, with its own close button.
+  const row = t.shadowRoots.at(-1).querySelector('.row');
+  assert.ok(tip(t).nextElementSibling === row);
+  assert.ok(tip(t).querySelector('button[aria-label="Close tip"]'));
+  // The × is a 44x44 touch target like every bar control: no rule shrinks it below that.
+  const style = t.shadowRoots.at(-1).querySelector('style').textContent;
+  assert.ok(/button, select, input \{[^}]*min-width: 44px; min-height: 44px;/.test(style), 'base 44px rule');
+  const closeRule = style.match(/\.tip \.tip-close \{([^}]*)\}/)?.[1] ?? '';
+  assert.ok(!/min-(width|height)/.test(closeRule), `tip × keeps 44px: ${closeRule}`);
+  // The next session on this device has no tip.
+  await t.c.handle({ type: 'stop' });
+  await t.c.handle({ type: 'start', source: 'auto' });
+  await flush();
+  assert.ok(!tip(t), 'no tip');
+});
+
+test('touch devices get the selection tip', async () => {
+  const t = await startedWithTip({ touch: true });
+  assert.ok(tipText(t) === TOUCH_TIP, `tip text: ${tipText(t)}`);
+});
+
+test('tip hides after 8 seconds, on ×, or on the first bar action', async () => {
+  // After 8 seconds.
+  const a = await startedWithTip();
+  a.clock.run(7999);
+  assert.ok(tip(a), 'still shown before 8 s');
+  a.clock.run(8000);
+  assert.ok(!tip(a), 'no tip');
+
+  // On ×: the tip goes, the session stays.
+  const b = await startedWithTip();
+  tap(b.document, tip(b).querySelector('button[aria-label="Close tip"]'));
+  assert.ok(!tip(b), 'no tip');
+  assert.ok(b.c.session, 'session still running');
+
+  // On the first bar action.
+  const c = await startedWithTip();
+  tap(c.document, c.shadowRoots.at(-1).querySelector('button.toggle'));
+  assert.ok(!tip(c), 'no tip');
+
+  // The selection strip wins over the tip.
+  const sel = liveSelection();
+  const d = await startedWithTip({ selection: () => sel });
+  assert.ok(tip(d));
+  const word = d.document.getElementById('p4').firstChild;
+  sel.select(word, 0, word, 9);
+  selectionChange(d.document);
+  d.clock.run(150);
+  assert.ok(strip(d));
+  assert.ok(!tip(d), 'no tip');
+});
+
+test('tip is not shown again after it was shown', async () => {
+  const t = await startedWithTip({ local: { tipShown: true } });
+  assert.ok(!tip(t), 'no tip');
+  // No storage.local at all: no tip either.
+  const u = await started();
+  await flush();
+  assert.ok(!tip(u), 'no tip');
+});
+
+test('showing the tip re-checks the current sentence', async () => {
+  const t = setup({ local: {} });
+  let release;
+  const read = new Promise((resolve) => {
+    release = resolve;
+  });
+  t.chrome.storage.local.get = () => read;
+  const c = install(t.win, t.deps);
+  await c.handle({ type: 'start', source: 'auto' });
+  fromFrame(c, { type: 'sentence-start', index: 1 });
+  const before = t.highlights.length;
+  release({ tipShown: false });
+  await flush();
+  assert.ok(tip(t), 'tip shown');
+  // The bar grew: the sentence is shown again, scrolling only if it is now under the bar.
+  assert.equal(t.highlights.length, before + 1);
+  assert.ok(t.highlighter.shown === c.session.sentences[1]);
+  assert.equal(t.highlighter.opts.scroll, true);
+});
+
+test('From here has an Alt+click tooltip on desktop only', async () => {
+  for (const touch of [false, true]) {
+    const sel = liveSelection();
+    const t = setup({ selection: () => sel });
+    if (touch) asTouch(t);
+    const c = install(t.win, t.deps);
+    await c.handle({ type: 'start', source: 'auto' });
+    const word = t.document.getElementById('p4').firstChild;
+    sel.select(word, 0, word, 9);
+    selectionChange(t.document);
+    t.clock.run(150);
+    const title = stripButton(t, 'Read from here').getAttribute('title');
+    if (touch) assert.equal(title, null);
+    else assert.equal(title, 'Read from here — or Alt+click any paragraph');
+  }
 });

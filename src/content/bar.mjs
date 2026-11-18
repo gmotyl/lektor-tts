@@ -19,27 +19,54 @@ const ICONS = {
   // Lektor monogram: L with a sound arc.
   logo: '<svg aria-hidden="true" focusable="false" viewBox="0 0 128 128"><rect width="128" height="128" rx="28" fill="#1e2a4a"/><path d="M38 28 V94 H76" fill="none" stroke="#ffffff" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/><path d="M72 46 a14 14 0 0 1 0 24" fill="none" stroke="#ffd54a" stroke-width="8" stroke-linecap="round"/><path d="M84 34 a30 30 0 0 1 0 48" fill="none" stroke="#ffd54a" stroke-width="8" stroke-linecap="round"/></svg>',
   close: svg('<path d="M3.5 2.1 8 6.6l4.5-4.5 1.4 1.4L9.4 8l4.5 4.5-1.4 1.4L8 9.4l-4.5 4.5-1.4-1.4L6.6 8 2.1 3.5z"/>'),
+  // Three dots: open the fold-out with voice, speed slider and autoscroll.
+  more: svg('<circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/>'),
+  // Chevron up: close the fold-out again.
+  collapse: svg('<path d="M8 4.5l5.5 5.5-1.2 1.2L8 6.9l-4.3 4.3-1.2-1.2z"/>'),
 };
+
+// Speed chip presets: a tap moves to the smallest preset above the current speed, and
+// from the top preset (or above it) back to the lowest.
+const SPEED_PRESETS = [0.8, 1.0, 1.2, 1.5, 2.0];
+
+export function nextSpeed(current) {
+  const s = Number(current);
+  return SPEED_PRESETS.find((p) => p > s + 1e-9) ?? SPEED_PRESETS[0];
+}
 
 const STYLE = `
   :host { all: initial; }
+  /* Floating card: 10px side margins, centred and capped so it does not stretch on desktop. */
   .bar {
-    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
-    /* left: 50% alone caps the shrink-to-fit width at half the viewport (195 px at 390 px). */
-    box-sizing: border-box; width: max-content; max-width: calc(100vw - 32px);
-    z-index: 2147483647; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-    padding: 8px 12px; border-radius: 10px; background: #1f2328; color: #f6f8fa;
-    font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    position: fixed; left: 10px; right: 10px; bottom: 16px; max-width: 560px; margin: 0 auto;
+    box-sizing: border-box; z-index: 2147483647; display: flex; flex-direction: column; gap: 8px;
+    padding: 8px; border-radius: 14px; background: #1f2328; color: #f6f8fa;
+    font: 15px/1.3 system-ui, sans-serif; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   }
-  button svg { display: block; }
+  .row { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; min-width: 0; }
+  .spacer { flex: 1 1 auto; min-width: 0; }
+  button svg { display: block; width: 20px; height: 20px; }
   button, select { font: inherit; color: inherit; background: #2d333b; border: 1px solid #444c56;
-    border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+    border-radius: 10px; padding: 0 10px; cursor: pointer; }
+  /* Touch targets: every control is at least 44x44. */
+  button, select, input { box-sizing: border-box; min-width: 44px; min-height: 44px; }
+  button { display: inline-flex; align-items: center; justify-content: center; flex: none; }
   button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible {
-    outline: 2px solid #58a6ff; outline-offset: 1px; }
+    outline: 2px solid #58a6ff; outline-offset: 2px; }
   button[aria-pressed="false"] { opacity: 0.55; }
+  .toggle { background: #2f8f7a; border-color: #2f8f7a; min-width: 52px; }
+  .speed-chip { padding: 0 12px; font-weight: 600; }
+  .more, .close { background: transparent; border-color: transparent; }
+  /* Open, ⋯ becomes the collapse control: a filled button, as in the mockup. */
+  .more[aria-expanded="true"] { background: #2d333b; border-color: #444c56; }
+  .autoscroll { gap: 6px; }
+  .fold { display: grid; gap: 10px; border-top: 1px solid #30363d; padding-top: 10px; }
+  .fold label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #c9d1d9; }
+  .fold select { min-width: 170px; max-width: 60%; }
+  .fold .speed { flex: 1; min-width: 0; }
   .speed-value { min-width: 2.5em; text-align: right; }
-  .error { flex-basis: 100%; display: flex; gap: 8px; align-items: center; color: #ffb4ab; }
-  .error[hidden] { display: none; }
+  .fold[hidden], .error[hidden] { display: none; }
+  .error { display: flex; gap: 8px; align-items: center; color: #ffb4ab; }
   .error a { color: #58a6ff; }
   .player { display: contents; }
   .player[hidden], .setup[hidden] { display: none; }
@@ -48,26 +75,47 @@ const STYLE = `
   .setup svg { width: 22px; height: 22px; flex: none; }
   .setup .message { flex: 1; min-width: 160px; }
   .setup-engine { background: #ffd54a; color: #1e2a4a; border-color: #ffd54a; font-weight: 600; }
+  /* Selection actions: their own block above the row, so the row never shifts sideways. */
+  .selection-actions { display: flex; gap: 6px; padding-bottom: 8px; border-bottom: 1px solid #30363d; }
+  .selection-actions button { flex: 1 1 0; gap: 6px; }
+  /* One-time tip: a thin line above the row. Its × keeps the 44x44 touch target; negative
+     block margins let it overhang the bar padding so the line stays thin. */
+  .tip { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; border-bottom: 1px solid #30363d;
+    font-size: 13px; color: #c9d1d9; }
+  .tip .tip-text { flex: 1; min-width: 0; }
+  .tip .tip-close { margin: -8px -4px -8px 0; padding: 0; background: transparent; border-color: transparent; }
+  .tip .tip-close svg { width: 14px; height: 14px; }
 `;
 
 const TEMPLATE = `
   <style>${STYLE}</style>
   <div class="bar" role="toolbar" aria-label="Reader">
-    <div class="player">
-      <button type="button" class="prev" aria-label="Previous" title="Previous sentence (Shift: paragraph)">${ICONS.prev}</button>
-      <button type="button" class="toggle" aria-label="Play">${ICONS.play}</button>
-      <button type="button" class="next" aria-label="Next" title="Next sentence (Shift: paragraph)">${ICONS.next}</button>
-      <select class="voice" aria-label="Voice"></select>
-      <input class="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-label="Speed">
-      <span class="speed-value">1.0&times;</span>
-      <button type="button" class="autoscroll" aria-label="Autoscroll" aria-pressed="true" title="Scroll to the read sentence">${ICONS.autoscroll}</button>
+    <div class="row">
+      <div class="player">
+        <button type="button" class="prev" aria-label="Previous" title="Previous sentence (Shift: paragraph)">${ICONS.prev}</button>
+        <button type="button" class="toggle" aria-label="Play">${ICONS.play}</button>
+        <button type="button" class="next" aria-label="Next" title="Next sentence (Shift: paragraph)">${ICONS.next}</button>
+        <button type="button" class="speed-chip" aria-label="Speed 1.0×, tap for the next preset">1.0&times;</button>
+        <span class="spacer"></span>
+        <button type="button" class="more" aria-label="More settings" aria-expanded="false" aria-controls="fold">${ICONS.more}</button>
+      </div>
+      <div class="setup" role="status" hidden>
+        ${ICONS.logo}
+        <span class="message">Lektor needs a speech engine before it can read.</span>
+        <button type="button" class="setup-engine">Set up a speech engine</button>
+      </div>
+      <button type="button" class="close" aria-label="Close">${ICONS.close}</button>
     </div>
-    <div class="setup" role="status" hidden>
-      ${ICONS.logo}
-      <span class="message">Lektor needs a speech engine before it can read.</span>
-      <button type="button" class="setup-engine">Set up a speech engine</button>
+    <div class="fold" id="fold" hidden>
+      <label>Voice <select class="voice" aria-label="Voice"></select></label>
+      <label>Speed
+        <input class="speed" type="range" min="0.5" max="2" step="0.1" value="1" aria-label="Speed">
+        <span class="speed-value">1.0&times;</span>
+      </label>
+      <label>Autoscroll
+        <button type="button" class="autoscroll" aria-label="Autoscroll" aria-pressed="true" title="Scroll to the read sentence">${ICONS.autoscroll}<span class="autoscroll-state">On</span></button>
+      </label>
     </div>
-    <button type="button" class="close" aria-label="Close">${ICONS.close}</button>
     <div class="error" role="alert" hidden>
       <span class="message"></span>
       <a class="options" href="#">Open options</a>
@@ -76,9 +124,19 @@ const TEMPLATE = `
   </div>
 `;
 
+// Shown while text outside the bar is selected during a session.
+const SELECTION_ACTIONS = `
+  <button type="button" class="read-from-here" aria-label="Read from here">${ICONS.play}<span>From here</span></button>
+  <button type="button" class="read-selection" aria-label="Read selection">${ICONS.play}<span>Selection</span></button>
+`;
+
+// Desktop only: a touch screen has no Alt+click.
+const FROM_HERE_TITLE = 'Read from here — or Alt+click any paragraph';
+
 const PLAYING_STATES = new Set(['playing', 'loading']);
 
-export function createBar({ doc = globalThis.document, onAction = () => {} } = {}) {
+// touch: a coarse-pointer device; it gets no Alt+click tooltip.
+export function createBar({ doc = globalThis.document, onAction = () => {}, touch = false } = {}) {
   const host = doc.createElement(HOST_TAG);
   host.setAttribute('data-omnivoice-reader', 'bar');
   host.setAttribute('style', HOST_STYLE);
@@ -91,11 +149,19 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   const voice = $('.voice');
   const speed = $('.speed');
   const speedValue = $('.speed-value');
+  const chip = $('.speed-chip');
+  const more = $('.more');
+  const fold = $('.fold');
   const autoscroll = $('.autoscroll');
+  const autoscrollState = $('.autoscroll-state');
   const error = $('.error');
   const message = $('.error .message');
   const player = $('.player');
   const setup = $('.setup');
+  const barEl = $('.bar');
+  const row = $('.row');
+  let selectionActions = null;
+  let tip = null;
 
   const on = (el, type, fn) => el.addEventListener(type, fn);
   on(toggle, 'click', () => onAction('toggle'));
@@ -111,6 +177,17 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   on($('.setup-engine'), 'click', () => onAction('setup'));
   on($('.options'), 'click', (e) => { e.preventDefault(); onAction('options'); });
   on(voice, 'change', () => onAction('voice', voice.value));
+  on(chip, 'click', () => {
+    const s = nextSpeed(speed.value);
+    setSpeed(s);
+    onAction('speed-cycle', s);
+  });
+  on(more, 'click', () => {
+    const open = more.getAttribute('aria-expanded') !== 'true';
+    setFold(open);
+    // The bar grows or shrinks: main re-checks the sentence being read against its new top edge.
+    onAction('fold', open);
+  });
   on(speed, 'input', () => {
     const s = Math.round(Number(speed.value) * 10) / 10;
     showSpeed(s);
@@ -118,7 +195,17 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
   });
 
   function showSpeed(s) {
-    speedValue.textContent = `${Number(s).toFixed(1)}×`;
+    const label = `${Number(s).toFixed(1)}×`;
+    speedValue.textContent = label;
+    chip.textContent = label;
+    chip.setAttribute('aria-label', `Speed ${label}, tap for the next preset`);
+  }
+
+  function setFold(open) {
+    more.setAttribute('aria-expanded', open ? 'true' : 'false');
+    more.innerHTML = open ? ICONS.collapse : ICONS.more;
+    if (open) fold.removeAttribute('hidden');
+    else fold.setAttribute('hidden', '');
   }
 
   // 'setup': no engine configured yet; only the setup prompt and × are shown.
@@ -128,6 +215,7 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
     else player.removeAttribute('hidden');
     if (setupMode) setup.removeAttribute('hidden');
     else setup.setAttribute('hidden', '');
+    if (setupMode) setFold(false);
     const playing = PLAYING_STATES.has(state);
     toggle.setAttribute('aria-label', playing ? 'Pause' : 'Play');
     toggle.innerHTML = playing ? ICONS.pause : ICONS.play;
@@ -162,11 +250,73 @@ export function createBar({ doc = globalThis.document, onAction = () => {} } = {
 
   function setAutoscroll(value) {
     autoscroll.setAttribute('aria-pressed', value ? 'true' : 'false');
+    autoscrollState.textContent = value ? 'On' : 'Off';
+  }
+
+  // Hosts an element (the player frame) inside the closed shadow root, out of the page's reach.
+  function mount(el) {
+    root.appendChild(el);
+  }
+
+  // Puts the host back if the page removed it (a frame in a detached host never loads).
+  // Returns true when it had to.
+  function attach() {
+    if (host.isConnected) return false;
+    (doc.body || doc.documentElement).appendChild(host);
+    return true;
+  }
+
+  function showSelectionActions(show) {
+    if (!show) {
+      selectionActions?.remove();
+      selectionActions = null;
+      return;
+    }
+    if (selectionActions) return;
+    // The strip wins over the tip: both above the row would be too much.
+    showTip(null);
+    const strip = doc.createElement('div');
+    strip.className = 'selection-actions';
+    strip.innerHTML = SELECTION_ACTIONS;
+    for (const [sel, type] of [['.read-from-here', 'read-from-here'], ['.read-selection', 'read-selection']]) {
+      const button = strip.querySelector(sel);
+      // Keep the page selection: a press on a button would otherwise clear it before the click.
+      on(button, 'mousedown', (e) => e.preventDefault());
+      on(button, 'click', () => onAction(type));
+    }
+    if (!touch) strip.querySelector('.read-from-here').setAttribute('title', FROM_HERE_TITLE);
+    barEl.insertBefore(strip, row);
+    selectionActions = strip;
+  }
+
+  // One-time tip line above the row; null removes it. Its × reports 'tip-close'. Returns true
+  // when the tip is on screen (never while the selection strip is).
+  function showTip(text) {
+    tip?.remove();
+    tip = null;
+    if (text == null || selectionActions) return false;
+    const line = doc.createElement('div');
+    line.className = 'tip';
+    line.setAttribute('role', 'note');
+    line.innerHTML = `<span class="tip-text"></span><button type="button" class="tip-close" aria-label="Close tip">${ICONS.close}</button>`;
+    line.querySelector('.tip-text').textContent = text;
+    on(line.querySelector('.tip-close'), 'click', () => onAction('tip-close'));
+    barEl.insertBefore(line, row);
+    tip = line;
+    return true;
   }
 
   function destroy() {
     host.remove();
   }
 
-  return { setState, setVoices, setSpeed, setAutoscroll, destroy };
+  // Viewport row of the card's top edge, read live (the strip and the fold-out change its
+  // height), or null when the bar is not on the page. The shadow root stays closed.
+  function topEdge() {
+    if (!host.isConnected) return null;
+    const r = barEl.getBoundingClientRect();
+    return r && r.height > 0 ? r.top : null;
+  }
+
+  return { setState, setVoices, setSpeed, setAutoscroll, showSelectionActions, showTip, mount, attach, destroy, topEdge };
 }

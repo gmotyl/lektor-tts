@@ -94,6 +94,36 @@ test('destroy removes the bar', () => {
   assert.equal(document.body.children.length, 1);
 });
 
+test("reports the bar's top edge", () => {
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  // The card's rect, read live from inside the closed shadow root.
+  let top = 740;
+  root.querySelector('.bar').getBoundingClientRect = () => ({ top, bottom: top + 60, height: 60, left: 10, right: 380 });
+  assert.equal(bar.topEdge(), 740);
+  top = 565;
+  assert.equal(bar.topEdge(), 565);
+  // Once removed from the page there is no bar to avoid.
+  bar.destroy();
+  assert.equal(bar.topEdge(), null);
+});
+
+test('topEdge is null for a zero-height bar', () => {
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  // A collapsed card (e.g. not laid out yet) covers nothing.
+  root.querySelector('.bar').getBoundingClientRect = () => ({ top: 800, bottom: 800, height: 0, left: 10, right: 380 });
+  assert.equal(bar.topEdge(), null);
+});
+
+test('opening the fold-out emits the fold action', () => {
+  const { document, attached, actions } = setup();
+  const more = attached[0].root.querySelector('button.more');
+  click(document, more);
+  click(document, more);
+  assert.deepEqual(actions, [['fold', true], ['fold', false]]);
+});
+
 test('bar host is a custom element reset against page CSS', () => {
   const { attached } = setup();
   const { host, root } = attached[0];
@@ -178,14 +208,26 @@ test('setup prompt logo is icon B with both sound arcs', () => {
   assert.deepEqual(arcs, ['M72 46 a14 14 0 0 1 0 24', 'M84 34 a30 30 0 0 1 0 48']);
 });
 
-test('bar may grow to the viewport width minus a margin', () => {
-  // With left: 50% alone the shrink-to-fit width stops at half the viewport.
+test('bar spans the viewport minus side margins, so the setup prompt keeps × on its row', () => {
+  // left and right both set: the card fills the viewport minus 10px each side (left: 50%
+  // alone used to cap the shrink-to-fit width at half the viewport).
   const { attached } = setup();
   const css = attached[0].root.querySelector('style').textContent;
-  assert.match(css, /\.bar \{[^}]*width: max-content; max-width: calc\(100vw - 32px\)/);
+  assert.match(css, /\.bar \{[^}]*left: 10px; right: 10px/);
   assert.match(css, /\.bar \{[^}]*box-sizing: border-box/);
   // The setup prompt shrinks and wraps inside itself, so × stays on its row.
   assert.match(css, /\.setup \{[^}]*flex: 1 1 0; min-width: 0/);
+  const close = attached[0].root.querySelector('button[aria-label="Close"]');
+  assert.equal(close.parentNode, attached[0].root.querySelector('.setup').parentNode, '× shares the row with the prompt');
+});
+
+test('setup state closes the fold-out', () => {
+  const { document, attached, bar } = setup();
+  const { root } = attached[0];
+  click(document, root.querySelector('button.more'));
+  bar.setState('setup');
+  assert.equal(root.querySelector('.fold').hasAttribute('hidden'), true);
+  assert.equal(root.querySelector('button.more').getAttribute('aria-expanded'), 'false');
 });
 
 test('close removes the setup prompt bar', async () => {
@@ -217,4 +259,189 @@ test('close removes the setup prompt bar', async () => {
   assert.equal(document.body.children.length, 1);
   // Nothing was playing: no engine message on close.
   assert.deepEqual(sent, []);
+});
+
+// Compact one-row bar (mockup option A).
+const css = (root) => root.querySelector('style').textContent;
+const rule = (root, selector) => {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = css(root).match(new RegExp(`(?:^|\\}|\\s)${escaped}\\s*\\{([^}]*)\\}`));
+  return m ? m[1] : '';
+};
+
+test('row holds transport controls in mockup order', () => {
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  bar.setState('playing');
+  const row = root.querySelector('.row');
+  assert.ok(row, 'row element');
+  const order = [...row.querySelectorAll('button, .spacer')]
+    .filter((el) => !el.closest('.setup'))
+    .map((el) => el.getAttribute('class').split(' ')[0]);
+  assert.deepEqual(order, ['prev', 'toggle', 'next', 'speed-chip', 'spacer', 'more', 'close']);
+  for (const sel of ['select[aria-label="Voice"]', 'input[aria-label="Speed"]', 'button[aria-label="Autoscroll"]']) {
+    const el = root.querySelector(sel);
+    assert.ok(el, sel);
+    assert.equal(el.closest('.row'), null, `${sel} is not in the row`);
+    assert.ok(el.closest('.fold'), `${sel} is in the fold-out`);
+  }
+});
+
+test('controls are at least 44px and play uses the accent', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  const sizing = rule(root, 'button, select, input');
+  assert.match(sizing, /min-width:\s*44px/);
+  assert.match(sizing, /min-height:\s*44px/);
+  assert.match(rule(root, '.toggle'), /background:\s*#2f8f7a/);
+});
+
+test('row does not wrap', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  assert.match(rule(root, '.row'), /display:\s*flex/);
+  assert.match(rule(root, '.row'), /flex-wrap:\s*nowrap/);
+  assert.match(rule(root, '.spacer'), /flex:\s*1/);
+});
+
+test('speed chip moves from an off-preset value to the next preset', () => {
+  const { document, attached, actions, bar } = setup();
+  const { root } = attached[0];
+  const chip = root.querySelector('button.speed-chip');
+  bar.setSpeed(1.3);
+  assert.equal(chip.textContent.trim(), '1.3×', 'chip shows a slider value');
+  click(document, chip);
+  assert.equal(chip.textContent.trim(), '1.5×');
+  assert.equal(root.querySelector('input[aria-label="Speed"]').value, '1.5');
+  assert.equal(root.querySelector('.speed-value').textContent, '1.5×');
+  bar.setSpeed(2);
+  click(document, chip);
+  assert.equal(chip.textContent.trim(), '0.8×');
+  bar.setSpeed(0.5);
+  click(document, chip);
+  assert.equal(chip.textContent.trim(), '0.8×');
+  assert.deepEqual(actions, [['speed-cycle', 1.5], ['speed-cycle', 0.8], ['speed-cycle', 0.8]]);
+  // The chip follows the slider too.
+  const slider = root.querySelector('input[aria-label="Speed"]');
+  slider.value = '1.7';
+  slider.dispatchEvent(new document.defaultView.Event('input', { bubbles: true }));
+  assert.equal(chip.textContent.trim(), '1.7×');
+});
+
+test('more button folds out voice speed and autoscroll', () => {
+  const { document, attached } = setup();
+  const { root } = attached[0];
+  const more = root.querySelector('button.more');
+  const fold = root.querySelector('.fold');
+  assert.equal(more.getAttribute('aria-label'), 'More settings');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(fold.hasAttribute('hidden'), true);
+  const closedIcon = more.innerHTML;
+  click(document, more);
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  assert.equal(fold.hasAttribute('hidden'), false);
+  assert.ok(more.querySelector('svg'), 'collapse icon is inline svg');
+  assert.notEqual(more.innerHTML, closedIcon, 'icon swaps to collapse');
+  for (const sel of ['select[aria-label="Voice"]', 'input[aria-label="Speed"]', '.speed-value', 'button[aria-label="Autoscroll"]']) {
+    assert.ok(fold.querySelector(sel), `${sel} in the fold-out`);
+  }
+  // The fold-out sits under the row.
+  const row = root.querySelector('.row');
+  assert.equal(row.compareDocumentPosition(fold) & 4, 4);
+  click(document, more);
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(fold.hasAttribute('hidden'), true);
+  assert.equal(more.innerHTML, closedIcon);
+});
+
+test('bar floats with margins and capped width', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  const bar = rule(root, '.bar');
+  assert.match(bar, /position:\s*fixed/);
+  assert.match(bar, /left:\s*10px/);
+  assert.match(bar, /right:\s*10px/);
+  assert.match(bar, /max-width:\s*560px/);
+  assert.match(bar, /margin:\s*0 auto/);
+  assert.match(bar, /border-radius:\s*14px/);
+  assert.match(bar, /background:\s*#1f2328/);
+});
+
+test('selection strip has two equal-width play buttons above the row', () => {
+  const { document, attached, actions, bar } = setup();
+  const { root } = attached[0];
+  assert.equal(root.querySelector('.selection-actions'), null);
+  bar.showSelectionActions(true);
+  bar.showSelectionActions(true);
+  assert.equal(root.querySelectorAll('.selection-actions').length, 1, 'shown once');
+  const strip = root.querySelector('.selection-actions');
+  assert.ok(strip.nextElementSibling === root.querySelector('.row'), 'strip sits above the row');
+  assert.match(rule(root, '.selection-actions'), /display:\s*flex/);
+  assert.match(rule(root, '.selection-actions button'), /flex:\s*1 1 0/);
+  const [fromHere, selection] = strip.querySelectorAll('button');
+  assert.equal(fromHere.getAttribute('aria-label'), 'Read from here');
+  assert.equal(selection.getAttribute('aria-label'), 'Read selection');
+  // Pressing a strip button must not clear the page selection before the click.
+  const down = new document.defaultView.Event('mousedown', { bubbles: true, cancelable: true });
+  fromHere.dispatchEvent(down);
+  assert.equal(down.defaultPrevented, true);
+  click(document, fromHere);
+  click(document, selection);
+  assert.deepEqual(actions, [['read-from-here', undefined], ['read-selection', undefined]]);
+  bar.showSelectionActions(false);
+  assert.equal(root.querySelector('.selection-actions'), null);
+});
+
+test('selection strip does not shift the transport row', () => {
+  // The strip stacks above the row (its own line in a column), never beside it, so the transport
+  // controls keep their horizontal position when it appears.
+  const { attached, bar } = setup();
+  const { root } = attached[0];
+  assert.match(rule(root, '.bar'), /display:\s*flex/);
+  assert.match(rule(root, '.bar'), /flex-direction:\s*column/);
+  assert.doesNotMatch(rule(root, '.selection-actions'), /display:\s*(contents|inline)/);
+  const row = root.querySelector('.row');
+  const rowParent = row.parentNode;
+  const before = [...rowParent.children].indexOf(row);
+  bar.showSelectionActions(true);
+  const strip = root.querySelector('.selection-actions');
+  assert.ok(strip.parentNode === root.querySelector('.bar'), 'a direct child of the bar');
+  assert.ok(strip.nextElementSibling === row, 'right before the row');
+  assert.ok(row.parentNode === rowParent, 'the row stays where it was');
+  assert.equal([...rowParent.children].indexOf(row), before + 1);
+  assert.equal(row.querySelector('.selection-actions'), null, 'nothing added inside the row');
+});
+
+// Visual verification against mockup option A (Task 9).
+test('open fold-out turns more into a filled collapse button', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  // Closed, ⋯ is a ghost button like ×; open, the collapse control is a filled button.
+  assert.match(rule(root, '.more, .close'), /background:\s*transparent/);
+  const open = rule(root, '.more[aria-expanded="true"]');
+  assert.match(open, /background:\s*#2d333b/);
+  assert.match(open, /border-color:\s*#444c56/);
+});
+
+test('autoscroll toggle shows On or Off next to its icon', () => {
+  const { document, attached, bar } = setup();
+  const { root } = attached[0];
+  const btn = root.querySelector('button[aria-label="Autoscroll"]');
+  assert.ok(btn.querySelector('svg'), 'icon kept');
+  assert.equal(btn.textContent.trim(), 'On');
+  click(document, btn);
+  assert.equal(btn.textContent.trim(), 'Off');
+  bar.setAutoscroll(true);
+  assert.equal(btn.textContent.trim(), 'On');
+  bar.setAutoscroll(false);
+  assert.equal(btn.textContent.trim(), 'Off');
+  assert.match(rule(root, '.autoscroll'), /gap:\s*6px/);
+});
+
+test('selection strip is divided from the row by a line', () => {
+  const { attached } = setup();
+  const { root } = attached[0];
+  const strip = rule(root, '.selection-actions');
+  assert.match(strip, /border-bottom:\s*1px solid #30363d/);
+  assert.match(strip, /padding-bottom:\s*8px/);
 });

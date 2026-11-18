@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Lektor TTS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minimum_chrome_version": "116",
   "description": "Reads the page's article or the selection aloud through an OpenAI-compatible text-to-speech server.",
-  "permissions": ["activeTab", "scripting", "offscreen", "contextMenus", "storage"],
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": {
@@ -12,6 +12,20 @@
     "type": "module"
   },
   "options_page": "src/options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/player.html",
+        "src/player.mjs",
+        "src/player/player.mjs",
+        "src/player/queue.mjs",
+        "src/engine.mjs",
+        "src/settings.mjs",
+        "src/presets.mjs"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "commands": {
     "toggle-reading": {
       "suggested_key": { "default": "Alt+Shift+R" },

@@ -18,31 +18,19 @@ function event() {
 // `session` (a plain object) backs a fake chrome.storage.session shared across workers.
 // Settings default to a configured engine preset; pass `stored: { preset: "" }` for a fresh install.
 function fakeChrome({ stored = {}, session } = {}) {
-  const calls = { tabMessages: [], runtimeMessages: [], injected: [], menus: [], offscreenCreated: 0, optionsOpened: 0 };
-  let offscreenOpen = false;
+  const calls = { tabMessages: [], runtimeMessages: [], injected: [], menus: [], optionsOpened: 0 };
+  // No offscreen API and no runtime.getContexts: calling either would throw.
   const chrome = {
     calls,
-    // Simulates Chrome closing an idle AUDIO_PLAYBACK document (~30 s without audio).
-    closeOffscreen: () => {
-      offscreenOpen = false;
-    },
     runtime: {
       onInstalled: event(),
       onMessage: event(),
       sendMessage: async (msg) => {
         calls.runtimeMessages.push(msg);
       },
-      getContexts: async () => (offscreenOpen ? [{ contextType: "OFFSCREEN_DOCUMENT" }] : []),
       getURL: (p) => `chrome-extension://id/${p}`,
       openOptionsPage: async () => {
         calls.optionsOpened++;
-      },
-    },
-    offscreen: {
-      createDocument: async () => {
-        await new Promise((r) => setTimeout(r, 5));
-        calls.offscreenCreated++;
-        offscreenOpen = true;
       },
     },
     action: { onClicked: event() },
@@ -82,9 +70,9 @@ function fakeChrome({ stored = {}, session } = {}) {
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
-// Delivers a runtime message as if it came from a content script in `tabId` (or from offscreen).
+// Delivers a runtime message as if it came from a content script in `tabId` (or an extension page).
 function deliver(chrome, msg, tabId) {
-  const sender = tabId === undefined ? { url: "chrome-extension://id/src/offscreen.html" } : { tab: { id: tabId } };
+  const sender = tabId === undefined ? { url: "chrome-extension://id/src/options.html" } : { tab: { id: tabId } };
   let response;
   const results = chrome.runtime.onMessage.fire(msg, sender, (r) => {
     response = r;
@@ -92,7 +80,8 @@ function deliver(chrome, msg, tabId) {
   return { results, response: () => response };
 }
 
-const PLAY = { type: "play", sentences: [["One."], ["Two."]], start: 0, voice: "", speed: 1 };
+const stopsTo = (chrome, tabId) =>
+  chrome.calls.tabMessages.filter((m) => m.tabId === tabId && m.msg.type === "stop").length;
 
 test("creates both context menus on install", async () => {
   const chrome = fakeChrome();
@@ -134,6 +123,7 @@ test("action click injects content and sends start", async () => {
 
   // Menu items inject too and carry their source; from-here carries the clicked link/image.
   chrome.contextMenus.onClicked.fire({ menuItemId: "read-selection" }, { id: 7 });
+  await tick();
   chrome.contextMenus.onClicked.fire(
     { menuItemId: "read-from-here", linkUrl: "https://a.example/x", srcUrl: "https://a.example/i.png" },
     { id: 8 },
@@ -142,6 +132,8 @@ test("action click injects content and sends start", async () => {
   assert.equal(chrome.calls.injected.length, 3);
   assert.deepEqual(chrome.calls.tabMessages.slice(1), [
     { tabId: 7, msg: { type: "start", source: "selection" } },
+    // Tab 8 takes over the session from tab 7.
+    { tabId: 7, msg: { type: "stop" } },
     {
       tabId: 8,
       msg: { type: "start", source: "from-here", linkUrl: "https://a.example/x", srcUrl: "https://a.example/i.png" },
@@ -152,13 +144,10 @@ test("action click injects content and sends start", async () => {
 test("shortcut toggles an existing session", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
-  // No session anywhere yet: the shortcut starts one.
+  // No session anywhere yet: the shortcut starts one, and that tab now owns the session.
   chrome.commands.onCommand.fire("toggle-reading", { id: 3 });
   await tick();
   assert.deepEqual(chrome.calls.tabMessages, [{ tabId: 3, msg: { type: "start", source: "auto" } }]);
-
-  deliver(chrome, PLAY, 3);
-  await tick();
   chrome.calls.tabMessages.length = 0;
   chrome.calls.injected.length = 0;
 
@@ -166,344 +155,324 @@ test("shortcut toggles an existing session", async () => {
   await tick();
   assert.deepEqual(chrome.calls.tabMessages, [{ tabId: 3, msg: { type: "toggle" } }]);
   assert.equal(chrome.calls.injected.length, 0);
-});
 
-test("play creates the offscreen document once", async () => {
-  const chrome = fakeChrome({ stored: { baseUrl: "http://localhost:9000/v1", apiKey: "k", voice: "v0" } });
-  createBackground(chrome);
-  deliver(chrome, PLAY, 1);
-  deliver(chrome, { ...PLAY, start: 1 }, 1);
-  await tick();
-  assert.equal(chrome.calls.offscreenCreated, 1);
-  // Concurrent plays from one tab: only the newest is forwarded.
-  const plays = chrome.calls.runtimeMessages.filter((m) => m.type === "play");
-  assert.equal(plays.length, 1);
-  assert.equal(plays[0].target, "offscreen");
-  assert.deepEqual(plays[0].sentences, PLAY.sentences);
-  assert.deepEqual(plays[0].settings, { baseUrl: "http://localhost:9000/v1", apiKey: "k", model: "tts-1" });
-  assert.equal(plays[0].start, 1);
-
-  // Controls from the owning tab are relayed to offscreen too.
-  deliver(chrome, { type: "seek", index: 1 }, 1);
-  deliver(chrome, { type: "set-speed", speed: 1.5 }, 1);
-  await tick();
-  const relayed = chrome.calls.runtimeMessages.slice(1);
-  assert.deepEqual(
-    relayed.map((m) => [m.type, m.target]),
-    [
-      ["seek", "offscreen"],
-      ["set-speed", "offscreen"],
-    ],
-  );
-
-  // A relayed copy (target offscreen) reaching the worker is not relayed again.
-  const before = chrome.calls.runtimeMessages.length;
-  deliver(chrome, { type: "seek", index: 0, target: "offscreen" });
-  await tick();
-  assert.equal(chrome.calls.runtimeMessages.length, before);
-});
-
-test("second tab stops the first session", async () => {
-  const chrome = fakeChrome();
-  createBackground(chrome);
-  deliver(chrome, PLAY, 1);
-  await tick();
-  chrome.calls.tabMessages.length = 0;
-
-  // Record the order of the stop to tab 1 and the play forwarded for tab 2.
-  const order = [];
-  const sendTab = chrome.tabs.sendMessage;
-  chrome.tabs.sendMessage = async (tabId, msg) => {
-    order.push(`tab${tabId}:${msg.type}`);
-    return sendTab(tabId, msg);
-  };
-  const sendRuntime = chrome.runtime.sendMessage;
-  chrome.runtime.sendMessage = async (msg) => {
-    order.push(`offscreen:${msg.type}`);
-    return sendRuntime(msg);
-  };
-  deliver(chrome, PLAY, 2);
-  await tick();
-  assert.deepEqual(order, ["tab1:stop", "offscreen:play"]);
-
-  // Tab 1's controls no longer reach the player.
-  deliver(chrome, { type: "pause" }, 1);
-  await tick();
-  assert.equal(order.length, 2);
-});
-
-test("tab reload or close stops playback", async () => {
-  const chrome = fakeChrome();
-  createBackground(chrome);
-  deliver(chrome, PLAY, 4);
-  await tick();
-  const stops = () => chrome.calls.runtimeMessages.filter((m) => m.type === "stop");
-
-  // Another tab or a non-loading update changes nothing.
-  chrome.tabs.onUpdated.fire(5, { status: "loading" });
-  chrome.tabs.onUpdated.fire(4, { title: "x" });
-  await tick();
-  assert.equal(stops().length, 0);
-
-  chrome.tabs.onUpdated.fire(4, { status: "loading" });
-  await tick();
-  assert.equal(stops().length, 1);
-  assert.equal(stops()[0].target, "offscreen");
-
-  deliver(chrome, PLAY, 4);
-  await tick();
-  chrome.tabs.onRemoved.fire(4, {});
-  await tick();
-  assert.equal(stops().length, 2);
-
-  // Ownership is gone: the shortcut on that tab starts afresh instead of toggling.
+  // Another tab is not the owner: the shortcut starts there.
   chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
   await tick();
   assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
 });
 
-test("offscreen events go to the owning tab only", async () => {
+test("starting in another tab stops the previous owner tab", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
-  deliver(chrome, PLAY, 1);
-  await tick();
-  deliver(chrome, PLAY, 2);
+  chrome.action.onClicked.fire({ id: 1 });
   await tick();
   chrome.calls.tabMessages.length = 0;
 
-  deliver(chrome, { type: "sentence-start", index: 1 });
-  deliver(chrome, { type: "state", state: "playing" });
-  await tick();
-  assert.deepEqual(chrome.calls.tabMessages, [
-    { tabId: 2, msg: { type: "sentence-start", index: 1 } },
-    { tabId: 2, msg: { type: "state", state: "playing" } },
-  ]);
-  // Nothing from offscreen is sent back to the runtime (no loop).
-  assert.equal(chrome.calls.runtimeMessages.filter((m) => m.type === "state").length, 0);
-
-  // A content script echoing an offscreen-only event type is ignored.
-  chrome.calls.tabMessages.length = 0;
-  deliver(chrome, { type: "state", state: "idle" }, 1);
-  await tick();
-  assert.deepEqual(chrome.calls.tabMessages, []);
-
-  // list-voices answers asynchronously; open-options opens the options page.
-  const fetchCalls = [];
-  const chrome2 = fakeChrome();
-  createBackground(chrome2, {
-    listVoices: async (settings) => {
-      fetchCalls.push(settings);
-      return { ok: true, voices: ["a", "b"] };
-    },
-  });
-  const { results, response } = deliver(chrome2, { type: "list-voices" }, 9);
-  assert.equal(results[0], true);
-  await tick();
-  assert.deepEqual(response(), { ok: true, voices: ["a", "b"] });
-  assert.equal(fetchCalls[0].baseUrl, "http://localhost:8892/v1");
-  deliver(chrome2, { type: "open-options" }, 9);
-  await tick();
-  assert.equal(chrome2.calls.optionsOpened, 1);
-});
-
-const plays = (chrome) => chrome.calls.runtimeMessages.filter((m) => m.type === "play");
-
-// Starts a session in tab 1, reports progress to sentence `index`, then pauses and lets Chrome
-// close the offscreen document.
-async function pausedAndClosed(chrome, index = 1) {
-  deliver(chrome, { ...PLAY, sentences: [["One."], ["Two."], ["Three."]] }, 1);
-  await tick();
-  deliver(chrome, { type: "state", state: "playing" });
-  deliver(chrome, { type: "sentence-start", index });
-  deliver(chrome, { type: "pause" }, 1);
-  await tick();
-  deliver(chrome, { type: "state", state: "paused" });
-  await tick();
-  chrome.closeOffscreen();
-}
-
-test("resume after the offscreen document closed replays from the current sentence", async () => {
-  const chrome = fakeChrome({ stored: { apiKey: "k" } });
-  createBackground(chrome);
-  await pausedAndClosed(chrome, 1);
-  chrome.calls.runtimeMessages.length = 0;
-
-  deliver(chrome, { type: "resume" }, 1);
-  await tick();
-  assert.equal(chrome.calls.offscreenCreated, 2);
-  assert.equal(plays(chrome).length, 1);
-  const replay = plays(chrome)[0];
-  assert.equal(replay.target, "offscreen");
-  assert.equal(replay.start, 1);
-  assert.equal(replay.tabId, 1);
-  assert.deepEqual(replay.sentences, [["One."], ["Two."], ["Three."]]);
-  assert.equal(replay.settings.apiKey, "k");
-  // The resume itself would go nowhere; only the replay is sent.
-  assert.equal(chrome.calls.runtimeMessages.filter((m) => m.type === "resume").length, 0);
-
-  // With the document alive again, controls are relayed as usual.
-  chrome.calls.runtimeMessages.length = 0;
-  deliver(chrome, { type: "pause" }, 1);
-  deliver(chrome, { type: "resume" }, 1);
+  // Every way of starting takes ownership: tab 1 is stopped before tab 2 starts.
+  chrome.contextMenus.onClicked.fire({ menuItemId: "read-selection" }, { id: 2 });
   await tick();
   assert.deepEqual(
-    chrome.calls.runtimeMessages.map((m) => m.type),
-    ["pause", "resume"],
+    chrome.calls.tabMessages.map(({ tabId, msg }) => `tab${tabId}:${msg.type}`),
+    ["tab1:stop", "tab2:start"],
   );
+
+  chrome.commands.onCommand.fire("toggle-reading", { id: 3 });
+  await tick();
+  assert.equal(stopsTo(chrome, 2), 1);
+
+  // Restarting in the owner tab itself sends it no stop.
+  chrome.action.onClicked.fire({ id: 3 });
+  await tick();
+  assert.equal(stopsTo(chrome, 3), 0);
+  assert.equal(chrome.calls.runtimeMessages.length, 0, "nothing goes to an offscreen document");
 });
 
-test("seek after the offscreen document closed replays from the target", async () => {
+test("owner tab close clears ownership", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
-  await pausedAndClosed(chrome, 0);
-  chrome.calls.runtimeMessages.length = 0;
-
-  deliver(chrome, { type: "seek", index: 2 }, 1);
+  chrome.action.onClicked.fire({ id: 4 });
   await tick();
-  assert.equal(plays(chrome).length, 1);
-  assert.equal(plays(chrome)[0].start, 2);
-  assert.equal(chrome.calls.runtimeMessages.filter((m) => m.type === "seek").length, 0);
+
+  // Another tab, or a non-loading update, changes nothing.
+  chrome.tabs.onRemoved.fire(5, {});
+  chrome.tabs.onUpdated.fire(4, { title: "x" });
+  await tick();
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "toggle" } });
+
+  chrome.tabs.onRemoved.fire(4, {});
+  await tick();
+  // No owner left: starting elsewhere stops nobody, and the shortcut on tab 4 starts afresh.
+  chrome.action.onClicked.fire({ id: 6 });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 0);
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
+  assert.equal(chrome.calls.runtimeMessages.length, 0, "nothing goes to an offscreen document");
 });
 
-test("voice or speed change while closed and paused applies on the next resume", async () => {
+test("owner tab navigation clears ownership", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
-  await pausedAndClosed(chrome, 1);
-  chrome.calls.runtimeMessages.length = 0;
-
-  deliver(chrome, { type: "set-voice", voice: "v2" }, 1);
-  deliver(chrome, { type: "set-speed", speed: 1.5 }, 1);
+  chrome.action.onClicked.fire({ id: 4 });
   await tick();
-  // Paused: nothing starts playing, the document is not recreated.
-  assert.equal(chrome.calls.runtimeMessages.length, 0);
-  assert.equal(chrome.calls.offscreenCreated, 1);
-
-  deliver(chrome, { type: "resume" }, 1);
+  chrome.tabs.onUpdated.fire(5, { status: "loading" });
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
   await tick();
-  assert.equal(plays(chrome).length, 1);
-  assert.equal(plays(chrome)[0].voice, "v2");
-  assert.equal(plays(chrome)[0].speed, 1.5);
-  assert.equal(plays(chrome)[0].start, 1);
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
 });
 
-test("voice change while closed and playing replays from the current sentence", async () => {
+// Answers the worker's ping from `tabId` like a content script would; other messages are recorded.
+function answerPing(chrome, tabId, answer) {
+  const send = chrome.tabs.sendMessage;
+  chrome.tabs.sendMessage = async (id, msg) => {
+    if (id === tabId && msg.type === "ping") {
+      chrome.calls.tabMessages.push({ tabId: id, msg });
+      return answer();
+    }
+    return send(id, msg);
+  };
+}
+
+test("same-document history update keeps the session and ownership", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
-  deliver(chrome, PLAY, 1);
+  chrome.action.onClicked.fire({ id: 4 });
   await tick();
-  deliver(chrome, { type: "state", state: "playing" });
-  deliver(chrome, { type: "sentence-start", index: 1 });
+  // A non-owner tab loading is not asked anything.
+  chrome.tabs.onUpdated.fire(5, { status: "loading" });
   await tick();
-  chrome.closeOffscreen();
-  chrome.calls.runtimeMessages.length = 0;
+  assert.equal(chrome.calls.tabMessages.filter((m) => m.tabId === 5).length, 0);
 
-  deliver(chrome, { type: "set-voice", voice: "v3" }, 1);
+  // history.replaceState with the same URL (gry-online waypoints) and a hash change both fire
+  // `loading` without a new document: the content script still has its session.
+  answerPing(chrome, 4, () => ({ alive: true }));
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  chrome.tabs.onUpdated.fire(4, { status: "loading", url: "https://example.com/a#x" });
   await tick();
-  assert.equal(plays(chrome).length, 1);
-  assert.equal(plays(chrome)[0].voice, "v3");
-  assert.equal(plays(chrome)[0].start, 1);
+  assert.equal(stopsTo(chrome, 4), 0);
+
+  // Still the owner: the shortcut toggles, a start elsewhere stops this tab.
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "toggle" } });
+  chrome.action.onClicked.fire({ id: 6 });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 1);
 });
 
-test("a restarted worker still replays after the offscreen document closed", async () => {
+test("real navigation clears ownership", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  // A cross-document navigation destroyed the content script: nothing receives the ping.
+  answerPing(chrome, 4, () => {
+    throw new Error("Could not establish connection. Receiving end does not exist.");
+  });
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 0, "the session died with the document; no stop needed");
+
+  chrome.action.onClicked.fire({ id: 6 });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 0);
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
+});
+
+test("a session that already ended releases ownership on loading", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  answerPing(chrome, 4, () => ({ alive: false }));
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  await tick();
+  assert.equal(stopsTo(chrome, 4), 0);
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
+});
+
+test("a start in the owner tab during the ping is not undone", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  // The ping answers only after a new start in the same tab took ownership again.
+  let release;
+  answerPing(chrome, 4, () => new Promise((r) => (release = () => r(undefined))));
+  chrome.tabs.onUpdated.fire(4, { status: "loading" });
+  await tick();
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  release();
+  await tick();
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "toggle" } });
+});
+
+test("a stale start does not show the setup prompt", async () => {
+  const chrome = fakeChrome();
+  // The first start's settings load is slow and finds no engine; the second is configured.
+  let release;
+  const loads = [
+    () => new Promise((r) => (release = r)),
+    async () => ({ preset: "omnivoice" }),
+  ];
+  createBackground(chrome, { loadSettings: () => loads.shift()() });
+  chrome.action.onClicked.fire({ id: 1 });
+  await tick();
+  chrome.action.onClicked.fire({ id: 2 });
+  await tick();
+  release({ preset: "" });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages, [{ tabId: 2, msg: { type: "start", source: "auto" } }]);
+});
+
+test("closing the bar in the owner tab ends its ownership", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 4 });
+  await tick();
+  // A non-owner's session-end changes nothing.
+  deliver(chrome, { type: "session-end" }, 5);
+  await tick();
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "toggle" } });
+
+  deliver(chrome, { type: "session-end" }, 4);
+  await tick();
+  chrome.commands.onCommand.fire("toggle-reading", { id: 4 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 4, msg: { type: "start", source: "auto" } });
+});
+
+test("a restarted worker still knows the owner tab", async () => {
   const session = {};
   const first = fakeChrome({ session });
   createBackground(first);
-  await pausedAndClosed(first, 2);
-
-  // Fresh worker instance, same storage.session; the offscreen document is gone.
-  const chrome = fakeChrome({ session });
-  createBackground(chrome);
-  deliver(chrome, { type: "resume" }, 1);
+  first.action.onClicked.fire({ id: 1 });
   await tick();
-  assert.equal(plays(chrome).length, 1);
-  assert.equal(plays(chrome)[0].start, 2);
-  assert.deepEqual(plays(chrome)[0].sentences, [["One."], ["Two."], ["Three."]]);
+
+  const second = fakeChrome({ session });
+  createBackground(second);
+  second.action.onClicked.fire({ id: 2 });
+  await tick();
+  assert.equal(stopsTo(second, 1), 1);
 });
 
-test("stop forgets the session so a later resume replays nothing", async () => {
+test("of two starts racing, the newest wins", async () => {
   const chrome = fakeChrome();
   createBackground(chrome);
-  await pausedAndClosed(chrome, 1);
-  deliver(chrome, { type: "stop" }, 1);
+  chrome.action.onClicked.fire({ id: 1 });
+  chrome.action.onClicked.fire({ id: 2 });
   await tick();
-  chrome.calls.runtimeMessages.length = 0;
-  deliver(chrome, { type: "resume" }, 1);
-  await tick();
-  assert.equal(plays(chrome).length, 0);
+  assert.deepEqual(chrome.calls.tabMessages, [{ tabId: 2, msg: { type: "start", source: "auto" } }]);
 });
 
-test("play failure reports an error state to the tab", async () => {
+test("a start superseded while stopping the previous owner is not delivered", async () => {
   const chrome = fakeChrome();
-  chrome.offscreen.createDocument = async () => {
-    throw new Error("offscreen refused");
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 1 });
+  await tick();
+  chrome.calls.tabMessages.length = 0;
+
+  // Tab 1's stop is slow: a newer start in tab 3 runs to completion meanwhile.
+  const send = chrome.tabs.sendMessage;
+  let release;
+  chrome.tabs.sendMessage = (tabId, msg) => {
+    if (tabId === 1 && msg.type === "stop" && !release) {
+      chrome.calls.tabMessages.push({ tabId, msg });
+      return new Promise((r) => (release = r));
+    }
+    return send(tabId, msg);
   };
-  createBackground(chrome);
-  deliver(chrome, PLAY, 6);
+  chrome.action.onClicked.fire({ id: 2 });
   await tick();
-  assert.deepEqual(chrome.calls.tabMessages, [
-    { tabId: 6, msg: { type: "state", state: "error", error: "offscreen refused" } },
-  ]);
-  assert.equal(plays(chrome).length, 0);
-});
-
-test("a tab that lost ownership while the document loaded does not play", async () => {
-  const chrome = fakeChrome();
-  createBackground(chrome);
-  deliver(chrome, PLAY, 1);
-  // Tab 2 takes over while tab 1's offscreen document is still being created (5 ms).
-  await new Promise((r) => setTimeout(r, 1));
-  deliver(chrome, { ...PLAY, start: 1 }, 2);
+  chrome.action.onClicked.fire({ id: 3 });
   await tick();
-  assert.deepEqual(
-    plays(chrome).map((m) => m.tabId),
-    [2],
+  release();
+  await tick();
+  assert.equal(
+    chrome.calls.tabMessages.filter(({ tabId, msg }) => tabId === 2 && msg.type === "start").length,
+    0,
+    "the superseded start in tab 2 is dropped",
   );
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 3, msg: { type: "start", source: "auto" } });
 });
 
-test("a slower earlier play from the same tab is dropped after a newer one", async () => {
+test("a newer start on an un-scriptable page does not cancel a pending start", async () => {
   const chrome = fakeChrome();
-  // The first settings load is slow, the second fast: the older play completes last.
-  const delays = [30, 0];
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 1 });
+  await tick();
+  chrome.calls.tabMessages.length = 0;
+
+  // Tab 1's stop is slow: meanwhile a start in tab 3 (a chrome:// page) fails to inject.
+  const send = chrome.tabs.sendMessage;
+  let release;
+  chrome.tabs.sendMessage = (tabId, msg) => {
+    if (tabId === 1 && msg.type === "stop" && !release) {
+      chrome.calls.tabMessages.push({ tabId, msg });
+      return new Promise((r) => (release = r));
+    }
+    return send(tabId, msg);
+  };
+  const inject = chrome.scripting.executeScript;
+  chrome.scripting.executeScript = async (opts) => {
+    if (opts.target.tabId === 3) throw new Error("Cannot access a chrome:// URL");
+    return inject(opts);
+  };
+  chrome.action.onClicked.fire({ id: 2 });
+  await tick();
+  chrome.action.onClicked.fire({ id: 3 });
+  await tick();
+  release();
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 2, msg: { type: "start", source: "auto" } });
+  // Ownership sits on the tab that received `start`: the shortcut there toggles.
+  chrome.commands.onCommand.fire("toggle-reading", { id: 2 });
+  await tick();
+  assert.deepEqual(chrome.calls.tabMessages.at(-1), { tabId: 2, msg: { type: "toggle" } });
+});
+
+test("a tab that cannot be scripted does not take ownership", async () => {
+  const chrome = fakeChrome();
+  createBackground(chrome);
+  chrome.action.onClicked.fire({ id: 1 });
+  await tick();
+  chrome.scripting.executeScript = async () => {
+    throw new Error("Cannot access a chrome:// URL");
+  };
+  chrome.action.onClicked.fire({ id: 2 });
+  await tick();
+  assert.equal(stopsTo(chrome, 1), 0);
+});
+
+test("list-voices answers from the engine with the stored settings", async () => {
+  const chrome = fakeChrome({ stored: { baseUrl: "http://localhost:9000/v1" } });
+  const asked = [];
   createBackground(chrome, {
-    loadSettings: async () => {
-      await new Promise((r) => setTimeout(r, delays.shift() ?? 0));
-      return { baseUrl: "http://localhost:9000/v1", apiKey: "k", model: "tts-1" };
+    listVoices: async (settings) => {
+      asked.push(settings.baseUrl);
+      return { ok: true, voices: ["a"] };
     },
   });
-  deliver(chrome, { ...PLAY, start: 0 }, 1);
-  await new Promise((r) => setTimeout(r, 1));
-  deliver(chrome, { ...PLAY, start: 1 }, 1);
-  await new Promise((r) => setTimeout(r, 60));
-  assert.deepEqual(
-    plays(chrome).map((m) => m.start),
-    [1],
-  );
-});
-
-test("a stale play waiting on the stop to the owner does not take ownership from a newer play", async () => {
-  const chrome = fakeChrome();
-  createBackground(chrome);
-  deliver(chrome, { ...PLAY, start: 0 }, 1);
+  const { results, response } = deliver(chrome, { type: "list-voices" }, 1);
+  assert.deepEqual(results, [true], "channel kept open");
   await tick();
-  chrome.calls.runtimeMessages.length = 0;
-  // The stop sent to tab 1 is slow, so tab 2's play is still awaiting it when tab 1 plays again.
-  const sendTab = chrome.tabs.sendMessage;
-  chrome.tabs.sendMessage = async (tabId, msg) => {
-    if (msg.type === "stop") await new Promise((r) => setTimeout(r, 30));
-    return sendTab(tabId, msg);
-  };
-  deliver(chrome, { ...PLAY, start: 5 }, 2);
-  await new Promise((r) => setTimeout(r, 1));
-  deliver(chrome, { ...PLAY, start: 7 }, 1);
-  await new Promise((r) => setTimeout(r, 60));
-  assert.deepEqual(
-    plays(chrome).map((m) => [m.tabId, m.start]),
-    [[1, 7]],
-  );
-  // Tab 1 still owns the session: its controls reach the player.
-  deliver(chrome, { type: "pause" }, 1);
-  await tick();
-  assert.ok(chrome.calls.runtimeMessages.some((m) => m.type === "pause" && m.tabId === 1));
+  assert.deepEqual(response(), { ok: true, voices: ["a"] });
+  assert.deepEqual(asked, ["http://localhost:9000/v1"]);
 });
 
 test("unconfigured start shows the setup prompt without calling the engine", async () => {
@@ -516,9 +485,13 @@ test("unconfigured start shows the setup prompt without calling the engine", asy
   };
   try {
     createBackground(chrome);
+    // One at a time: of concurrent starts only the newest would show the prompt.
     chrome.action.onClicked.fire({ id: 7 });
+    await tick();
     chrome.commands.onCommand.fire("toggle-reading", { id: 8 });
+    await tick();
     chrome.contextMenus.onClicked.fire({ menuItemId: "read-selection" }, { id: 9 });
+    await tick();
     chrome.contextMenus.onClicked.fire({ menuItemId: "read-from-here", linkUrl: "https://a.example/x" }, { id: 10 });
     await tick();
   } finally {
@@ -538,8 +511,7 @@ test("unconfigured start shows the setup prompt without calling the engine", asy
       [10, "setup-prompt"],
     ],
   );
-  assert.equal(plays(chrome).length, 0);
-  assert.equal(chrome.calls.offscreenCreated, 0);
+  assert.equal(chrome.calls.runtimeMessages.length, 0);
   assert.deepEqual(fetched, []);
 });
 
@@ -589,5 +561,4 @@ test("setup button opens the options page", async () => {
   button.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true }));
   await tick();
   assert.equal(chrome.calls.optionsOpened, 1);
-  assert.equal(plays(chrome).length, 0);
 });

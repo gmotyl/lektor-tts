@@ -5,8 +5,12 @@
 // Writes store/screenshot-setup.png, store/screenshot-unconfigured.png and
 // store/screenshot-reading.png (1280×800 each), plus qa/visual/setup-390.png,
 // qa/visual/setup-1280.png, qa/visual/icon-toolbars.png and the other setup states
-// (setup-{other,omnivoice,success,more}-{1280,390}.png, bar-unconfigured-390.png) for the
-// mockup comparison.
+// (setup-{other,omnivoice,success,more}-{1280,390}.png, bar-unconfigured-390.png) and the
+// player bar states (bar-{playing,selection,settings}-{390,1280}.png and bar-tip-390.png, see
+// barCaptures()) for the mockup comparison.
+//
+// Each run starts from a fresh profile, so the one-time start-point tip would show in the first
+// session; the tip flag is seeded before any capture and cleared only for bar-tip-390.png.
 //
 // The toolbar button cannot be clicked in headless Chromium, and chrome.action.onClicked
 // cannot be fired from outside, so the script runs the same path in the service worker as the
@@ -139,11 +143,139 @@ async function reading({ context, worker }, articleUrl, engineUrl) {
 
 const WIDTHS = [1280, 390];
 
+const BAR_STATES = ["playing", "selection", "settings"];
+const BAR_VIEWPORTS = { 390: { width: 390, height: 844 }, 1280: { width: 1280, height: 800 } };
+
+// The player bar captures for the mockup comparison: each state at a phone and a desktop
+// viewport, full viewport so the bar's place at the bottom shows, plus the one-time start-point
+// tip at the phone width. Pure, for the tests.
+export function barCaptures() {
+  const capture = (state, width) => ({
+    state,
+    width,
+    viewport: { ...BAR_VIEWPORTS[width] },
+    file: `bar-${state}-${width}.png`,
+  });
+  return [...BAR_STATES.flatMap((state) => Object.keys(BAR_VIEWPORTS).map((width) => capture(state, Number(width)))), capture("tip", 390)];
+}
+
+// The tip shows once per device (chrome.storage.local "tipShown"). A fresh profile has no flag.
+const setTipShown = (worker, shown) =>
+  worker.evaluate((value) => (value ? chrome.storage.local.set({ tipShown: true }) : chrome.storage.local.remove("tipShown")), shown);
+
 async function atWidths(page, name) {
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
     await shoot(page, join(QA, `${name}-${width}.png`), { fullPage: true });
   }
+}
+
+// Centre of the bar's ⋯ button in page coordinates. The bar lives in a closed shadow root, so
+// the point is derived from its CSS: fixed, 10px side margins, centred, max-width 560px,
+// bottom 16px, padding 8px; with the fold-out closed the row is the bottom block, and ⋯ is
+// the 44px button left of × (also 44px) with a 6px gap. Keep in step with src/content/bar.mjs.
+async function moreButtonPoint(page) {
+  return page.evaluate(() => {
+    const vw = document.documentElement.clientWidth;
+    const vh = globalThis.innerHeight;
+    const barWidth = Math.min(vw - 20, 560);
+    const barRight = (vw + barWidth) / 2;
+    return { x: barRight - 8 - 44 - 6 - 22, y: vh - 16 - 8 - 22 };
+  });
+}
+
+// Height of the player bar in CSS px. The host ([data-omnivoice-reader]) is an inline box with
+// a fixed-position child behind a closed shadow root, so its own rect is empty; hits inside the
+// shadow tree retarget to the host, so walk up the bar's centre line from the bottom until
+// elementFromPoint leaves it.
+async function barHeight(page) {
+  return page.evaluate(() => {
+    const host = document.querySelector("[data-omnivoice-reader]");
+    if (!host) return 0;
+    const x = document.documentElement.clientWidth / 2;
+    let top = null;
+    let bottom = null;
+    for (let y = globalThis.innerHeight - 1; y >= 0; y--) {
+      const onBar = document.elementFromPoint(x, y) === host;
+      if (onBar && bottom === null) bottom = y;
+      if (onBar) top = y;
+      else if (bottom !== null) break;
+    }
+    return bottom === null ? 0 : bottom - top + 1;
+  });
+}
+
+// The player bar during a session: playing, with a phrase selected (selection strip above the
+// row) and with ⋯ opened (fold-out). Runs after reading(), which saved the engine settings.
+async function barStates({ context, worker }, articleUrl) {
+  const byState = Object.groupBy(barCaptures(), (c) => c.state);
+  const captureState = async (page, state) => {
+    for (const { viewport, file } of byState[state]) {
+      await page.setViewportSize(viewport);
+      await page.waitForTimeout(300);
+      await shoot(page, join(QA, file));
+    }
+  };
+  const page = await context.newPage();
+  await page.setViewportSize(BAR_VIEWPORTS[390]);
+  await page.goto(articleUrl);
+  await clickAction(worker, articleUrl);
+  await page.waitForFunction(() => globalThis.CSS?.highlights?.get("reader-current")?.size > 0, null, { timeout: 15000 });
+  await page.mouse.move(0, 0);
+  await captureState(page, "playing");
+
+  // A phrase in a paragraph visible at both widths; the strip shows after the 150ms debounce.
+  await page.evaluate(() => {
+    const p = [...document.querySelectorAll("article p")].find((el) => el.textContent.startsWith("Texts were written to be heard."));
+    const text = p.firstChild;
+    const phrase = "Scrolls had no spaces between words";
+    const start = text.textContent.indexOf(phrase);
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, start + phrase.length);
+    const selection = globalThis.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await page.waitForTimeout(400);
+  await captureState(page, "selection");
+
+  await page.evaluate(() => globalThis.getSelection().removeAllRanges());
+  await page.waitForTimeout(400);
+  await page.setViewportSize(byState.settings[0].viewport);
+  const more = await moreButtonPoint(page);
+  const closedHeight = await barHeight(page);
+  await page.mouse.click(more.x, more.y);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(300);
+  const openHeight = await barHeight(page);
+  if (!(closedHeight > 0 && openHeight > closedHeight)) {
+    throw new Error(
+      `The ⋯ click did not open the fold-out: bar height ${closedHeight}px before, ${openHeight}px after ` +
+        `(click at ${more.x},${more.y}; keep moreButtonPoint in step with src/content/bar.mjs).`,
+    );
+  }
+  console.log(`fold-out opened: bar ${closedHeight}px -> ${openHeight}px`);
+  await captureState(page, "settings");
+  await page.close();
+}
+
+// The one-time start-point tip above the row: clear the flag, start a session and capture well
+// within the tip's 8 seconds. Starting the session sets the flag again.
+async function barTip({ context, worker }, articleUrl) {
+  const [{ viewport, file }] = barCaptures().filter((c) => c.state === "tip");
+  await setTipShown(worker, false);
+  const page = await context.newPage();
+  await page.setViewportSize(viewport);
+  await page.goto(articleUrl);
+  await clickAction(worker, articleUrl);
+  await page.waitForFunction(() => globalThis.CSS?.highlights?.get("reader-current")?.size > 0, null, { timeout: 15000 });
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(300);
+  const shown = await worker.evaluate(() => chrome.storage.local.get({ tipShown: false }));
+  if (!shown.tipShown) throw new Error("The start-point tip did not show (tipShown flag not set).");
+  await shoot(page, join(QA, file));
+  await page.close();
 }
 
 // The other setup states the mockup shows: each card selected, the connected status after
@@ -229,11 +361,15 @@ export async function main() {
   });
   const browser = await launch();
   try {
+    // No tip in the store and bar captures; barTip() shows it on purpose.
+    await setTipShown(browser.worker, true);
     const articleUrl = `${engine.url}${ARTICLE}`;
     await setupScreens(browser);
     await unconfiguredBar(browser, articleUrl);
     await setupStates(browser, engine.url);
     await reading(browser, articleUrl, engine.url);
+    await barStates(browser, articleUrl);
+    await barTip(browser, articleUrl);
     await iconToolbars(browser);
   } finally {
     await browser.close();

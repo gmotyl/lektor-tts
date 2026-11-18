@@ -1,4 +1,4 @@
-// Prefetching sentence queue for the offscreen player.
+// Prefetching sentence queue for the player frame.
 // A sentence is an array of ≤400-char pieces; its audio is the ArrayBuffer[]
 // of those pieces, fetched one after another in order.
 
