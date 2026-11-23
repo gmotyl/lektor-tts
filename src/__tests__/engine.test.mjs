@@ -105,6 +105,15 @@ test("listVoices reports failure when both endpoints fail", async () => {
   assert.equal("voices" in res, false);
 });
 
+test("listVoices names a web page answer instead of a JSON parse error", async () => {
+  // A web app behind the address (e.g. a panel serving its SPA for every path) answers 200 with HTML.
+  const page = () => new Response("<!DOCTYPE html><html></html>", { status: 200, headers: { "content-type": "text/html" } });
+  const res = await listVoices(settings, fakeFetch(page));
+  assert.equal(res.ok, false);
+  assert.match(res.error, /web page, not a speech server/);
+  assert.doesNotMatch(res.error, /Unexpected token/);
+});
+
 test("trailing slash in baseUrl is normalised", async () => {
   const s = { ...settings, baseUrl: "http://localhost:8000/v1/" };
   const f = fakeFetch((url) => (url.endsWith("/audio/voices") ? json({ voices: [] }) : audio()));

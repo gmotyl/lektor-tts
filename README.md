@@ -97,6 +97,19 @@ Free, runs on your own computer (an NVIDIA GPU is needed for real-time speech).
 `http://localhost` and `http://127.0.0.1` are allowed by the manifest, so there is no permission
 prompt.
 
+**On another device** (a phone, a second computer) `localhost` is not the server. Expose it with
+Tailscale (omnivoice-server README,
+[Using it from other devices](https://github.com/gmotyl/omnivoice-server#using-it-from-other-devices-optional-tailscale))
+and use the address from its [Tailnet URLs](https://github.com/gmotyl/omnivoice-server#tailnet-urls)
+table: `https://<host>.<tailnet>.ts.net:8444/v1`. Save asks for permission to reach that origin.
+Only the adapter's port (8444 → local 8892) speaks the OpenAI API; the other tailnet ports do not:
+
+| Tailnet port | Behind it            | Works in Lektor |
+| ------------ | -------------------- | --------------- |
+| `8444`       | adapter (8892)       | yes, with `/v1` |
+| `8443`       | anytts relay (8891)  | no: 404         |
+| `443`        | whatever else the host serves (e.g. a web app) | no: "answers with a web page" |
+
 ### Other server
 
 Any OpenAI-compatible endpoint.

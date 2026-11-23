@@ -55,7 +55,16 @@ export async function speak(settings, { text, voice }, signal, fetchImpl = fetch
 async function getJson(settings, path, fetchImpl) {
   const res = await fetchImpl(url(settings, path), { method: "GET", headers: headers(settings) });
   if (!res.ok) throw new EngineError(res.status, await errorMessage(res));
-  return res.json();
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // A web app at this address (it serves its page for every path) rather than a speech engine.
+    if (/^\s*</.test(text)) {
+      throw new EngineError(res.status, "this address answers with a web page, not a speech server. Check the port and the /v1 path");
+    }
+    throw new EngineError(res.status, `the server did not answer with JSON at ${path}`);
+  }
 }
 
 export async function listVoices(settings, fetchImpl = fetch) {
